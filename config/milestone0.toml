@@ -1,0 +1,52 @@
+[runtime]
+app_name = "dcs_dungeon_master"
+environment = "development"
+dry_run = true
+
+[logging]
+level = "INFO"
+format = "text"
+
+[dcs]
+remote_hosted = false
+
+[dcs.olympus]
+base_url = "http://127.0.0.1:4512"
+timeout_sec = 5.0
+
+[dcs.grpc]
+host = "127.0.0.1"
+port = 50051
+timeout_sec = 5.0
+
+[[models]]
+name = "local_default"
+hosting_mode = "local"
+endpoint = "http://127.0.0.1:1234/v1"
+model = "gemma-4-26b-a4b-it"
+enabled = true
+multimodal = false
+
+[[models]]
+name = "lan_default"
+hosting_mode = "lan"
+endpoint = "http://192.168.1.10:1234/v1"
+model = "gemma-4-26b-a4b-it"
+enabled = false
+multimodal = false
+
+[[models]]
+name = "hosted_default"
+hosting_mode = "hosted"
+endpoint = "https://api.openai.com/v1"
+model = "gpt-5"
+enabled = false
+multimodal = false
+api_key_env_var = "OPENAI_API_KEY"
+
+[scenario]
+id = "phase1_baseline_caucasus_frontier"
+
+[dry_run]
+enabled = true
+summary_output = "text"
