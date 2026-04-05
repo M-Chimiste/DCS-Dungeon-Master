@@ -1,0 +1,6 @@
+[[scenarios]]
+id = "phase1_baseline_persian_gulf"
+name = "Phase 1 Baseline: Persian Gulf Frontier"
+theater = "Persian Gulf"
+path = "phase1_baseline_persian_gulf.toml"
+summary = "Compact Persian Gulf corridor scenario for dual strategic commanders with contested center sectors."
