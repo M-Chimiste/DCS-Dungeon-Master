@@ -645,8 +645,8 @@ This supports:
 
 ## Relationship To Other Documents
 
-- `PRD.md` defines the product goals and scope
-- `ARCHITECTURE.md` should describe how the perception layer produces this observation
-- `ACTION-SPEC.md` should define what actions can be taken in response to this observation
-- `SCENARIO-SPEC.md` should define the sectors, control points, and starting conditions used by the observation layer
-- `EVAL-PLAN.md` should define how observation quality and anti-cheat behavior are tested
+- `project-docs/PRD.md` defines the product goals and scope
+- `project-docs/ARCHITECTURE.md` should describe how the perception layer produces this observation
+- `project-docs/ACTION-SPEC.md` should define what actions can be taken in response to this observation
+- `project-docs/SCENARIO-SPEC.md` should define the sectors, control points, and starting conditions used by the observation layer
+- `project-docs/EVAL-PLAN.md` should define how observation quality and anti-cheat behavior are tested
