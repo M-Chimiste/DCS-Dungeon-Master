@@ -75,6 +75,7 @@ def test_bootstrap_application_without_external_dependencies(tmp_path: Path) -> 
     assert summary["service_statuses"]["live_command_loop"] == "live-loop-ready"
     assert summary["service_statuses"]["operator_control"] == "operator-control-ready"
     assert summary["service_statuses"]["evaluation"] == "evaluation-ready"
+    assert summary["service_statuses"]["web_ui_api"] == "web-ui-api-ready"
     assert summary["integration_endpoints"]["olympus"] == "http://127.0.0.1:4512"
     assert summary["integration_endpoints"]["dcs_grpc"] == "127.0.0.1:50051"
     assert summary["integration_health"] is None

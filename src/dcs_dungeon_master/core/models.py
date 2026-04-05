@@ -852,6 +852,117 @@ class CoalitionInspectionView:
 
 
 @dataclass(slots=True, frozen=True)
+class CampaignSectorView:
+    id: str
+    name: str
+    role: str
+    center_lat: float | None
+    center_lng: float | None
+    radius_nm: float
+    neighbor_ids: tuple[str, ...] = ()
+    tags: tuple[str, ...] = ()
+    intended_owner: str | None = None
+    assigned_force_ids: tuple[str, ...] = ()
+
+
+@dataclass(slots=True, frozen=True)
+class CampaignControlPointView:
+    id: str
+    name: str
+    sector_id: str
+    kind: str
+    owner: str | None
+    strategic_value: str
+    lat: float | None = None
+    lng: float | None = None
+    assigned_force_ids: tuple[str, ...] = ()
+
+
+@dataclass(slots=True, frozen=True)
+class CommanderForcePolicyView:
+    coalition: Coalition
+    budget_remaining: int
+    objectives: tuple[str, ...] = ()
+    active_groups: tuple[dict[str, Any], ...] = ()
+    reserve_groups: tuple[dict[str, Any], ...] = ()
+    deployment_restrictions: tuple[dict[str, Any], ...] = ()
+    standing_orders: tuple[str, ...] = ()
+
+
+@dataclass(slots=True, frozen=True)
+class MapReferenceLayer:
+    theater_id: str
+    reference_status: str
+    message: str
+    default_center_lat: float | None = None
+    default_center_lng: float | None = None
+    default_radius_nm: float | None = None
+    airports: tuple[dict[str, Any], ...] = ()
+    sectors: tuple[dict[str, Any], ...] = ()
+    control_points: tuple[dict[str, Any], ...] = ()
+    zones: tuple[dict[str, Any], ...] = ()
+
+
+@dataclass(slots=True, frozen=True)
+class ScenarioDraftPatch:
+    scenario: dict[str, Any]
+    pydcs_mapping: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True, frozen=True)
+class ScenarioDraftView:
+    draft_id: str
+    source_scenario_id: str
+    source_scenario_name: str | None
+    scenario_id: str
+    name: str
+    display_name: str
+    theater: str
+    updated_at: datetime
+    scenario: dict[str, Any]
+    dirty: bool = False
+    map_reference: MapReferenceLayer | None = None
+    pydcs_mapping: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True, frozen=True)
+class OperatorMapLayerSet:
+    sectors: tuple[dict[str, Any], ...] = ()
+    control_points: tuple[dict[str, Any], ...] = ()
+    zones: tuple[dict[str, Any], ...] = ()
+    world_groups: tuple[dict[str, Any], ...] = ()
+    red_knowledge_tracks: tuple[dict[str, Any], ...] = ()
+    blue_knowledge_tracks: tuple[dict[str, Any], ...] = ()
+    current_execution_notes: tuple[dict[str, Any], ...] = ()
+    attachments: tuple[dict[str, Any], ...] = ()
+
+
+@dataclass(slots=True, frozen=True)
+class CommanderPreviewSnapshot:
+    run_id: str
+    coalition: Coalition
+    observation_id: int
+    decision_cycle: int
+    generated_at: datetime
+    narrative: str
+    observation: CommanderObservation
+    map_overlay_uri: str | None = None
+
+
+@dataclass(slots=True, frozen=True)
+class LiveOpsSnapshot:
+    run: RunControlState
+    summary: RunSummary
+    timeline: tuple[RunTimelineEntry, ...]
+    operator_map_layers: OperatorMapLayerSet
+    red_inspection: CoalitionInspectionView
+    blue_inspection: CoalitionInspectionView
+    red_knowledge: CoalitionKnowledgeState | None
+    blue_knowledge: CoalitionKnowledgeState | None
+    world_state: WorldStateSnapshot
+
+
+@dataclass(slots=True, frozen=True)
 class RunFailureEntry:
     subsystem: str
     coalition: Coalition | None

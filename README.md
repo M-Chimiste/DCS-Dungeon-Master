@@ -6,7 +6,7 @@ The system sits between DCS/Olympus/DCS-gRPC and one or more LLM backends. It bu
 
 ## Current Status
 
-Milestones 0-8 are implemented.
+Milestones 0-8 are implemented, and Milestone 10 now adds a first web UI/API slice for Campaign Studio and Live Ops.
 
 Milestone 9 evaluation tooling is implemented, but the real baseline matrix still needs to be run against live-capable simulator/model endpoints before it should be considered operationally signed off.
 
@@ -21,6 +21,7 @@ What already works in-repo:
 - dry and live command loops
 - operator controls, replay export, and run inspection
 - evaluation summaries, fairness review, and matrix tooling
+- web UI API plus a React/Vite Studio and Ops shell
 
 ## Requirements
 
@@ -134,6 +135,44 @@ This reports:
 - backend health
 - backend capabilities
 - RED and BLUE primary/fallback routing
+
+### 3.5. Web UI
+
+Run the Python API server:
+
+```bash
+uv run dcs-dungeon-master serve-web-ui \
+  --config config/milestone0.toml \
+  --host 127.0.0.1 \
+  --port 8080
+```
+
+Then, in a second terminal, run the frontend:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+The Vite app defaults to [http://127.0.0.1:5173](http://127.0.0.1:5173) and proxies `/api` to the Python server on port `8080`.
+
+Current Milestone 10.1 QoL improvements:
+
+- Campaign Studio drafts auto-save after a short delay
+- draft lifecycle actions: rename, duplicate, revert, delete
+- click-to-select sector and control-point editing on the map
+- structured editing for zones, force placement, reserve allowed sectors, and restrictions
+- validation issues link back to the affected authored object
+- Live Ops layer toggles, manual refresh, and visibility-aware polling
+
+Useful direct API checks:
+
+```bash
+curl http://127.0.0.1:8080/api/scenarios
+curl http://127.0.0.1:8080/api/runs
+curl http://127.0.0.1:8080/api/scenarios/drafts
+```
 
 ### 4. Observation and fusion inspection
 

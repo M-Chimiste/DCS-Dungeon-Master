@@ -112,6 +112,7 @@ def bootstrap_application(config_path: str | Path = DEFAULT_CONFIG_PATH) -> Appl
         "persistence": "sqlite-ready",
         "operator_control": operator_control.status,
         "evaluation": evaluation.status,
+        "web_ui_api": "web-ui-api-ready",
         "knowledge_debug": "debug-ready" if debug_view else "debug-unavailable",
     }
     logger.info("Bootstrapped dry-run application for scenario '%s' into run '%s'.", scenario.id, run_id)
