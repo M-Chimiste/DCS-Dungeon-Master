@@ -20,7 +20,7 @@ This specification applies to:
 
 - One REDFOR commander
 - One BLUFOR commander
-- The Phase 1 baseline scenario in `SCENARIO-SPEC.md`
+- The Phase 1 baseline scenario in `project-docs/SCENARIO-SPEC.md`
 - Strategic ground-command actions only
 
 This specification does not authorize unrestricted use of the full Olympus or DCS-gRPC command surface.
@@ -572,8 +572,8 @@ Required behavior:
 
 ## Relationship To Other Documents
 
-- `PRD.md` defines the product goals and bounded-command philosophy
-- `OBSERVATION-SPEC.md` defines the inputs that drive these actions
-- `SCENARIO-SPEC.md` defines where these actions are legal and useful
-- `ARCHITECTURE.md` should define how actions are validated and translated into simulator commands
-- `EVAL-PLAN.md` should define how action quality, validity, and usefulness are measured
+- `project-docs/PRD.md` defines the product goals and bounded-command philosophy
+- `project-docs/OBSERVATION-SPEC.md` defines the inputs that drive these actions
+- `project-docs/SCENARIO-SPEC.md` defines where these actions are legal and useful
+- `project-docs/ARCHITECTURE.md` should define how actions are validated and translated into simulator commands
+- `project-docs/EVAL-PLAN.md` should define how action quality, validity, and usefulness are measured

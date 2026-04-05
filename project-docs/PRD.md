@@ -92,7 +92,7 @@ The first release should treat map understanding as a product problem, not only 
 
 The harness should not depend on raw screenshots being interpreted directly by the model as the primary observation channel. Instead, the primary observation should be a structured world representation derived from simulation state, map geometry, unit positions, detection confidence, zone ownership, and relevant mission drawings.
 
-Multi-modal inputs may still be valuable, but they should be treated as an optional enhancement for later phases, especially for:
+Multi-modal inputs may still be valuable, but they should be treated as an optional enhancement area rather than a core dependency. Limited Phase 1 experiments are acceptable, but the system should not require multimodal inputs to function. This is especially true for:
 
 - Interpreting mission drawings or complex map overlays not yet normalized into data
 - Assisting with operator review or debugging
@@ -239,11 +239,11 @@ This means Phase 1 should prefer a "state-to-text and state-to-JSON" observation
 
 This PRD should be followed by a small set of focused documents before coding begins:
 
-- `ARCHITECTURE.md`: system components, data flow, and service boundaries
-- `OBSERVATION-SPEC.md`: exact commander context schema, salience rules, and fog-of-war treatment
-- `ACTION-SPEC.md`: allowed tool calls, validation rules, and rejection reasons
-- `EVAL-PLAN.md`: benchmark scenarios, metrics, and test procedure
-- `SCENARIO-SPEC.md`: first playable scenario assumptions, force pools, sectors, and objectives
+- `project-docs/ARCHITECTURE.md`: system components, data flow, and service boundaries
+- `project-docs/OBSERVATION-SPEC.md`: exact commander context schema, salience rules, and fog-of-war treatment
+- `project-docs/ACTION-SPEC.md`: allowed tool calls, validation rules, and rejection reasons
+- `project-docs/EVAL-PLAN.md`: benchmark scenarios, metrics, and test procedure
+- `project-docs/SCENARIO-SPEC.md`: first playable scenario assumptions, force pools, sectors, and objectives
 
 ## Notes From Current References
 

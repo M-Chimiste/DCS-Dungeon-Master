@@ -156,7 +156,6 @@ Each coalition starts with some combination of:
 
 - Fixed or semi-fixed rear air-defense coverage
 - One forward air-defense group
-- One mobile reserve SAM group
 - One mobile ground maneuver group
 - One long-range fires or missile launcher group
 - One deception or low-value support group if useful for testing ambiguity
@@ -168,16 +167,15 @@ Each coalition starts with some combination of:
 - Mobile groups matter more than total count
 - High-value assets should be few enough to be strategically legible
 
-### Suggested Baseline Composition
+### Suggested Baseline Initially Deployed Composition
 
-This is a planning baseline, not a locked ORBAT.
+This is a planning baseline for forces that begin active in the scenario, not a locked ORBAT.
 
-Per coalition:
+Per coalition, initially deployed:
 
 - 1 rear air-defense cluster
 - 1 forward air-defense group
-- 1 mobile reserve SAM group
-- 1 ground maneuver reserve group
+- 1 ground maneuver group
 - 1 fires group or missile launcher group
 - 1 to 2 small recon or screening groups
 
@@ -385,8 +383,8 @@ These variants should come after the baseline scenario is reliable and replayabl
 
 ## Relationship To Other Documents
 
-- `PRD.md` defines the product goals and Phase 1 scope
-- `OBSERVATION-SPEC.md` defines how this scenario is presented to each commander
-- `ACTION-SPEC.md` should define what commanders are allowed to do inside this scenario
-- `ARCHITECTURE.md` should define how the scenario state is represented and advanced
-- `EVAL-PLAN.md` should define how runs on this scenario are measured and compared
+- `project-docs/PRD.md` defines the product goals and Phase 1 scope
+- `project-docs/OBSERVATION-SPEC.md` defines how this scenario is presented to each commander
+- `project-docs/ACTION-SPEC.md` should define what commanders are allowed to do inside this scenario
+- `project-docs/ARCHITECTURE.md` should define how the scenario state is represented and advanced
+- `project-docs/EVAL-PLAN.md` should define how runs on this scenario are measured and compared
