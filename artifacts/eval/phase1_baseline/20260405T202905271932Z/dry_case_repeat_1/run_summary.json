@@ -1,0 +1,217 @@
+{
+  "coalition_views": [
+    {
+      "coalition": "red",
+      "current_execution_notes": [],
+      "latest_action_validation": null,
+      "latest_execution": null,
+      "latest_model_invocation": null,
+      "latest_observation": null,
+      "run_id": "d35b5c1e018a46bca438354d8573509e"
+    },
+    {
+      "coalition": "blue",
+      "current_execution_notes": [],
+      "latest_action_validation": null,
+      "latest_execution": null,
+      "latest_model_invocation": null,
+      "latest_observation": null,
+      "run_id": "d35b5c1e018a46bca438354d8573509e"
+    }
+  ],
+  "cycle_classification_counts": {},
+  "decision_cycle_count": 0,
+  "execution_count": 0,
+  "execution_count_by_coalition": {
+    "blue": 0,
+    "red": 0
+  },
+  "execution_status_counts": {},
+  "failure_counts": {},
+  "failures": [],
+  "last_error_summary": [],
+  "latest_decision_cycle": 0,
+  "model_invocation_count": 0,
+  "model_invocation_count_by_coalition": {
+    "blue": 0,
+    "red": 0
+  },
+  "model_status_counts": {},
+  "observation_count": 0,
+  "observation_count_by_coalition": {
+    "blue": 0,
+    "red": 0
+  },
+  "run": {
+    "blue_backend_name": "blue_backend",
+    "config_digest": "e1ff58835976d6efb827268deec575f33b05c9155388c1c861de79d45683e665",
+    "config_snapshot": {
+      "dcs": {
+        "grpc": {
+          "host": "127.0.0.1",
+          "port": 50051,
+          "retry_attempts": 1,
+          "secure": false,
+          "server_host_override": null,
+          "timeout_sec": 5.0
+        },
+        "olympus": {
+          "base_url": "http://127.0.0.1:4512",
+          "health_path": "/olympus/mission",
+          "password_env_var": null,
+          "retry_attempts": 1,
+          "timeout_sec": 5.0,
+          "token_env_var": null,
+          "username": null,
+          "verify_tls": true
+        },
+        "remote_hosted": false
+      },
+      "dry_run": {
+        "enabled": true,
+        "summary_output": "text"
+      },
+      "evaluation": {
+        "decision_cadence_sec": 30,
+        "default_run_cycles": 4,
+        "fairness_mode": "hybrid",
+        "matrix_cases": [
+          {
+            "blue_backend": "blue_backend",
+            "decision_cadence_sec": 30,
+            "description": "Dry matrix case",
+            "id": "dry_case",
+            "mode": "dry",
+            "red_backend": "red_backend",
+            "repeat_count": 1,
+            "run_cycles": 1,
+            "system_prompt_variant_override": null,
+            "visual_attachment": false
+          },
+          {
+            "blue_backend": "blue_backend",
+            "decision_cadence_sec": 30,
+            "description": "Visual matrix case",
+            "id": "visual_case",
+            "mode": "dry",
+            "red_backend": "red_backend",
+            "repeat_count": 1,
+            "run_cycles": 1,
+            "system_prompt_variant_override": null,
+            "visual_attachment": true
+          }
+        ],
+        "notes": null,
+        "profile_name": "phase1_baseline",
+        "prompt_version": "phase1_default",
+        "resource_settings_version": "phase1_default",
+        "review_policy": "suspicious_only",
+        "scenario_seed": null
+      },
+      "fog_of_war": {
+        "adjacency_drift_enabled": true,
+        "archive_window_sec": 1800,
+        "debug_truth_comparison": false,
+        "decay_window_sec": 900,
+        "freshness_window_sec": 300,
+        "inference_mode": "conservative"
+      },
+      "logging": {
+        "format": "text",
+        "level": "INFO"
+      },
+      "model_routing": {
+        "blue_backend": "blue_backend",
+        "blue_fallback_backend": null,
+        "red_backend": "red_backend",
+        "red_fallback_backend": null
+      },
+      "models": [
+        {
+          "api_key_env_var": null,
+          "enabled": true,
+          "endpoint": "http://127.0.0.1:1234/v1",
+          "hosting_mode": "local",
+          "max_output_tokens": null,
+          "max_retries": 1,
+          "model": "gemma-4-26b-a4b-it",
+          "multimodal": false,
+          "name": "red_backend",
+          "system_prompt_variant": null,
+          "temperature": 0.2,
+          "timeout_sec": 30.0
+        },
+        {
+          "api_key_env_var": null,
+          "enabled": true,
+          "endpoint": "http://127.0.0.1:1235/v1",
+          "hosting_mode": "local",
+          "max_output_tokens": null,
+          "max_retries": 1,
+          "model": "gemma-4-26b-a4b-it",
+          "multimodal": false,
+          "name": "blue_backend",
+          "system_prompt_variant": null,
+          "temperature": 0.2,
+          "timeout_sec": 30.0
+        }
+      ],
+      "multimodal": {
+        "enabled": false,
+        "output_dir": ".cache/dcs-dungeon-master/attachments"
+      },
+      "persistence": {
+        "db_path": "/private/var/folders/9d/0m0dj3d57wx23n4kwncb7hrm0000gn/T/pytest-of-c/pytest-37/test_evaluation_matrix_skips_v0/state.sqlite3",
+        "enable_wal": true
+      },
+      "runtime": {
+        "app_name": "dcs_dungeon_master",
+        "dry_run": true,
+        "environment": "test"
+      },
+      "scenario": {
+        "id": "phase1_baseline_persian_gulf",
+        "registry_path": "scenarios/index.toml"
+      }
+    },
+    "created_at": "2026-04-05T20:29:05.275893+00:00",
+    "evaluation_metadata": {
+      "action_schema_version": "0.1",
+      "blue_hosting_mode": "local",
+      "blue_model_identifier": "gemma-4-26b-a4b-it",
+      "decision_cadence_sec": 30,
+      "default_run_cycles": 4,
+      "fairness_mode": "hybrid",
+      "notes": "matrix_case=dry_case;repeat=1",
+      "observation_schema_version": "0.1",
+      "profile_name": "phase1_baseline",
+      "prompt_version": "phase1_default",
+      "red_hosting_mode": "local",
+      "red_model_identifier": "gemma-4-26b-a4b-it",
+      "resource_settings_version": "phase1_default",
+      "review_policy": "suspicious_only",
+      "scenario_seed": null
+    },
+    "failed_at": null,
+    "mode": "dry",
+    "paused_at": null,
+    "red_backend_name": "red_backend",
+    "resumed_at": null,
+    "run_id": "d35b5c1e018a46bca438354d8573509e",
+    "scenario_id": "phase1_baseline_persian_gulf",
+    "scenario_name": "Phase 1 Baseline: Persian Gulf Frontier",
+    "scenario_version": "1",
+    "started_at": null,
+    "status": "created",
+    "stopped_at": null,
+    "terminal_reason": null,
+    "theater": "Persian Gulf"
+  },
+  "validation_count": 0,
+  "validation_count_by_coalition": {
+    "blue": 0,
+    "red": 0
+  },
+  "warning_counts": {},
+  "warnings": []
+}

@@ -45,7 +45,9 @@ Phase 1 assumptions:
 
 - The only real model transport implemented today is an OpenAI-compatible adapter, primarily targeting LM Studio and similar endpoints.
 - Structured JSON output is the primary model-return path and is preferred over free-form text responses.
-- Multimodal support remains stub-only in the current implementation. Observation contracts can carry attachment metadata, but image and video submission are not yet active parts of the live loop.
+- Optional multimodal support is implemented as a backend-gated image attachment path. Structured JSON remains authoritative even when an attachment is submitted alongside the canonical observation.
+- Backend failover is implemented as one primary backend plus one optional fallback backend per coalition. Failover is only used for transport or parse failure and reuses the same observation snapshot.
+- Action validation is constrained to scenario-known, coalition-owned, and coalition-visible data. Hidden world truth is not part of legality decisions.
 
 ## System Context
 

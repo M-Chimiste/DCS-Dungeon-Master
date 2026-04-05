@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 from dcs_dungeon_master.core.config import DcsConfig
 from dcs_dungeon_master.integration.grpc_client import DcsGrpcClient
+from dcs_dungeon_master.integration.ingest import IntegrationIngestCoordinator
 from dcs_dungeon_master.integration.olympus import OlympusClient
 from dcs_dungeon_master.integration.types import IntegrationHealthStatus
 
@@ -25,3 +26,6 @@ def build_integration_services(config: DcsConfig) -> IntegrationServices:
         olympus=OlympusClient(config.olympus),
         dcs_grpc=DcsGrpcClient(config.grpc),
     )
+
+
+__all__ = ["IntegrationServices", "IntegrationIngestCoordinator", "build_integration_services"]

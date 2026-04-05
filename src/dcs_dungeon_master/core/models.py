@@ -25,6 +25,7 @@ from dcs_dungeon_master.core.enums import (
     EvaluationReviewPolicy,
     RunLifecycleStatus,
     SectorPriority,
+    ValidationEvidenceBasis,
     ValidationStatus,
 )
 
@@ -273,6 +274,28 @@ class WorldStateSnapshot:
 
 
 @dataclass(slots=True, frozen=True)
+class NormalizedIntegrationBatch:
+    mission_snapshot_present: bool
+    unit_snapshot_count: int
+    airfield_snapshot_count: int
+    grpc_metadata_present: bool
+    grpc_event_count: int
+
+
+@dataclass(slots=True, frozen=True)
+class IngestCycleResult:
+    id: int | None
+    run_id: str
+    occurred_at: datetime
+    mission_time: str | None
+    olympus_available: bool
+    grpc_available: bool
+    normalized_batch: NormalizedIntegrationBatch
+    error_classification: str | None = None
+    error_detail: str | None = None
+
+
+@dataclass(slots=True, frozen=True)
 class FusionUpdateResult:
     generated_at: datetime
     policy: FogOfWarPolicy
@@ -358,6 +381,19 @@ class ObservationAttachment:
 
 
 @dataclass(slots=True, frozen=True)
+class ObservationAttachmentArtifact:
+    attachment_id: str
+    run_id: str
+    coalition: Coalition
+    decision_cycle: int
+    media_type: str
+    role: str
+    file_path: str
+    submitted_to_backend: bool
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True, frozen=True)
 class SectorSummaryEntry:
     sector_id: str
     sector_label: str
@@ -434,6 +470,7 @@ class ObservationArtifact:
     fusion_update_id: int | None
     observation: CommanderObservation
     narrative: str
+    attachment_artifacts: tuple[ObservationAttachmentArtifact, ...] = ()
 
 
 @dataclass(slots=True, frozen=True)
@@ -479,11 +516,12 @@ class ValidationContext:
     reserve_groups: tuple[ReserveGroupState, ...]
     world_state: WorldStateSnapshot
     latest_observation: ObservationArtifact | None = None
+    latest_knowledge: CoalitionKnowledgeState | None = None
 
 
 @dataclass(slots=True, frozen=True)
 class ValidationAuditEvidence:
-    source_type: str
+    source_type: ValidationEvidenceBasis
     identifier: str | None
     detail: str
 
@@ -578,6 +616,8 @@ class ModelInvocationResult:
     total_tokens: int | None = None
     validation_batch_id: int | None = None
     wrapped_response_object: dict[str, Any] | None = None
+    failover_used: bool = False
+    attempt_trace: tuple["ModelInvocationAttempt", ...] = ()
 
 
 @dataclass(slots=True, frozen=True)
@@ -588,6 +628,21 @@ class ModelBackendCapability:
     openai_compatible: bool
     supports_structured_output: bool
     supports_multimodal: bool
+
+
+@dataclass(slots=True, frozen=True)
+class ModelInvocationAttempt:
+    backend_name: str
+    status: str
+    parse_status: str
+    error_detail: str | None = None
+
+
+@dataclass(slots=True, frozen=True)
+class ModelInvocationChainResult:
+    final_result: ModelInvocationResult
+    attempts: tuple[ModelInvocationAttempt, ...]
+    fallback_used: bool
 
 
 @dataclass(slots=True, frozen=True)
@@ -863,6 +918,12 @@ class ReplayExportResult:
     output_dir: str
     manifest_path: str
     file_count: int
+    exported_at: datetime | None = None
+    file_inventory: tuple[str, ...] = ()
+    includes_evaluation_summary: bool = False
+    includes_cycle_evaluations: bool = False
+    includes_fairness_findings: bool = False
+    includes_matrix_report: bool = False
 
 
 @dataclass(slots=True, frozen=True)

@@ -12,7 +12,9 @@ Read this before making code changes.
 
 ## Current Repo State
 
-Milestones 0 through 9 are implemented.
+Milestones 0 through 8 are implemented.
+
+Milestone 9 tooling is implemented, but operational baseline-matrix sign-off is still pending a real run against live-capable endpoints.
 
 The repo now includes:
 
@@ -24,10 +26,12 @@ The repo now includes:
 - Canonical observation building and replay artifacts
 - Phase 1 action validation
 - OpenAI-compatible model adapter support
+- Primary-plus-fallback backend routing
 - Dry dual-commander decision loop
 - Live execution and command loop
 - CLI-first operator control, replay bundles, and run inspection
 - Evaluation harness, fairness review, and baseline matrix tooling
+- Optional coalition-filtered multimodal observation attachments
 
 There is no higher numbered milestone defined yet in `project-docs/MILESTONE-PLAN.md`.
 
@@ -75,7 +79,7 @@ Phase 1 is not:
 ## Core Architecture Rules
 
 - Structured observations are the canonical model input.
-- Multimodal inputs are optional and experimental only after the structured path works.
+- Multimodal inputs are optional, image-only, and backend-gated after the structured path works.
 - The model never talks directly to raw simulator APIs.
 - The harness validates every action before execution.
 - The harness may know more internally than either commander sees.
@@ -87,7 +91,8 @@ Follow the milestone sequence in `project-docs/MILESTONE-PLAN.md`.
 
 Current milestone status:
 
-- Milestones 0-9: implemented
+- Milestones 0-8: implemented
+- Milestone 9: implemented in code, pending operational baseline evidence
 
 Do not jump straight to live simulator execution before the existing domain, observation, validation, and dry-loop layers are respected.
 
@@ -158,3 +163,4 @@ If no more specific task is given, the default focus should be post-Milestone-9 
 - preserve coalition-safe observation and validation behavior
 - avoid bypassing the dry-loop and validation boundaries
 - improve baseline evaluation quality and tuning workflows
+- do not claim Milestone 9 completion until a real baseline matrix run has been captured and summarized

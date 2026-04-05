@@ -5,6 +5,7 @@ from pathlib import Path
 
 from dcs_dungeon_master.core.config import FogOfWarConfig
 from dcs_dungeon_master.core.enums import Coalition, ConfidenceBand, KnowledgeLevel
+from dcs_dungeon_master.integration.ingest import IntegrationIngestCoordinator
 from dcs_dungeon_master.integration.types import GrpcStreamEnvelope, OlympusMissionSnapshot, OlympusUnitSnapshot
 from dcs_dungeon_master.persistence import SQLiteStateStore
 from dcs_dungeon_master.scenario_state.registry import get_scenario_definition
@@ -142,3 +143,35 @@ def test_sensor_fusion_marks_stale_and_archived_tracks(tmp_path: Path) -> None:
     assert stale_track.confidence is ConfidenceBand.LOW
     assert stale_track.estimated_sector_id is not None
     assert archived_track.archived is True
+
+
+def test_integration_ingest_coordinator_persists_ingest_cycle(tmp_path: Path) -> None:
+    store, scenario, run_id, repository, updater, _, _ = _build_services(tmp_path)
+
+    class FakeIntegrations:
+        olympus = type(
+            "FakeOlympus",
+            (),
+            {
+                "get_mission_snapshot": staticmethod(lambda: OlympusMissionSnapshot(theater="Persian Gulf", mission_time="12:00:00Z")),
+                "get_units_snapshot": staticmethod(lambda: ()),
+                "get_airfields_snapshot": staticmethod(lambda: ()),
+            },
+        )()
+        dcs_grpc = type(
+            "FakeGrpc",
+            (),
+            {
+                "get_mission_metadata": staticmethod(lambda: type("GrpcMeta", (), {"theater": "Persian Gulf", "mission_name": "Test", "mission_time": "12:00:00Z"})()),
+                "iter_unit_events": staticmethod(lambda **kwargs: iter(())),
+                "iter_mission_events": staticmethod(lambda: iter(())),
+            },
+        )()
+
+    coordinator = IntegrationIngestCoordinator(FakeIntegrations(), updater)
+    result = coordinator.ingest_once(run_id, occurred_at=datetime(2026, 4, 5, 12, 0, tzinfo=UTC))
+
+    assert result.id is not None
+    assert result.normalized_batch.mission_snapshot_present is True
+    assert store.list_ingest_cycle_results(run_id)[0].mission_time == "12:00:00Z"
+    assert repository.summarize(run_id)["evidence_count"] >= 2

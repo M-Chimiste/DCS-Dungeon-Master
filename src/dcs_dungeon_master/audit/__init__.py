@@ -34,6 +34,7 @@ class MilestoneAuditService:
         fusion_blue = self.sensor_fusion.summarize(resolved_run_id, Coalition.BLUE)
         integration_health = self.integrations.check_health()
         backend_descriptors = self.model_registry.describe_backends()
+        ingest_cycles = self.store.list_ingest_cycle_results(resolved_run_id)
 
         checks: list[dict[str, object]] = []
 
@@ -57,6 +58,13 @@ class MilestoneAuditService:
                     all(hasattr(item, "status") for item in integration_health),
                     "integration health surfaces",
                     [self._serialize(item) for item in integration_health],
+                ),
+                self._check(
+                    "Milestone 2",
+                    "Normalized Olympus/gRPC ingest cycles are persisted into world state",
+                    bool(ingest_cycles),
+                    "integration ingest persistence",
+                    [self._serialize(item) for item in ingest_cycles[-3:]],
                 ),
                 self._check(
                     "Milestone 2",
@@ -86,12 +94,17 @@ class MilestoneAuditService:
         checks.append(
             self._check(
                 "Milestone 4",
-                "Persisted observations include replayable canonical payloads and attachment placeholders",
-                len(observations) >= 2 and all(artifact.observation.attachments for artifact in observations[-2:]),
+                "Persisted observations include replayable canonical payloads and optional real attachment artifacts",
+                len(observations) >= 2
+                and (
+                    not self.config.multimodal.enabled
+                    or all(artifact.attachment_artifacts for artifact in observations[-2:])
+                ),
                 "observation artifacts",
                 {
                     "observation_count": len(observations),
                     "latest_attachment_counts": [len(artifact.observation.attachments) for artifact in observations[-2:]],
+                    "latest_attachment_artifact_counts": [len(artifact.attachment_artifacts) for artifact in observations[-2:]],
                 },
             )
         )
@@ -144,6 +157,23 @@ class MilestoneAuditService:
                     "decision_cycle_count": len(decision_cycles),
                     "model_invocation_count": len(invocations),
                     "cycle_classifications": [cycle.classification for cycle in decision_cycles],
+                },
+            )
+        )
+        checks.append(
+            self._check(
+                "Milestone 6",
+                "Primary and fallback backend routing are configured per coalition",
+                bool(self.config.model_routing.red_backend)
+                and bool(self.config.model_routing.blue_backend)
+                and self.config.model_routing.red_fallback_backend is not None
+                and self.config.model_routing.blue_fallback_backend is not None,
+                "model routing config",
+                {
+                    "red_backend": self.config.model_routing.red_backend,
+                    "red_fallback_backend": self.config.model_routing.red_fallback_backend,
+                    "blue_backend": self.config.model_routing.blue_backend,
+                    "blue_fallback_backend": self.config.model_routing.blue_fallback_backend,
                 },
             )
         )
@@ -211,6 +241,53 @@ class MilestoneAuditService:
                     "status": run_summary["status"],
                     "execution_batch_count": run_summary["execution_batch_count"],
                 },
+            )
+        )
+        try:
+            evaluation_summary = self.store.get_evaluation_run_summary(resolved_run_id)
+            fairness_findings = self.store.list_fairness_findings(resolved_run_id)
+        except PersistenceError:
+            evaluation_summary = None
+            fairness_findings = ()
+        profile_name = (run_summary.get("evaluation_metadata") or {}).get("profile_name") if isinstance(run_summary, dict) else None
+        try:
+            matrix_report = self.store.get_matrix_run_report(profile_name) if profile_name else None
+        except PersistenceError:
+            matrix_report = None
+        replay_exports = self.store.list_replay_export_results(resolved_run_id)
+        checks.append(
+            self._check(
+                "Milestone 9",
+                "Evaluation summaries and fairness findings persist for measured runs",
+                evaluation_summary is not None,
+                "evaluation persistence",
+                {
+                    "evaluation_summary_present": evaluation_summary is not None,
+                    "fairness_finding_count": len(fairness_findings),
+                },
+            )
+        )
+        checks.append(
+            self._check(
+                "Milestone 9",
+                "Matrix report availability exists for the evaluation profile",
+                matrix_report is not None,
+                "evaluation matrix report",
+                self._serialize(matrix_report) if matrix_report is not None else {"profile_name": profile_name},
+            )
+        )
+        checks.append(
+            self._check(
+                "Milestone 9",
+                "Replay exports persist explicit evaluation artifact coverage",
+                any(
+                    export.includes_evaluation_summary
+                    and export.includes_cycle_evaluations
+                    and export.includes_fairness_findings
+                    for export in replay_exports
+                ),
+                "replay export persistence",
+                [self._serialize(item) for item in replay_exports[-3:]],
             )
         )
 

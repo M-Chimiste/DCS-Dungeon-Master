@@ -1,0 +1,41 @@
+{
+  "case_results": [
+    {
+      "blue_backend": "local_default",
+      "case_id": "dry_case",
+      "decision_cadence_sec": 30,
+      "description": "Dry matrix case.",
+      "detail": "fairness_score=100",
+      "evaluation_run_id": "0448208f91e34384a36447c0d5ebdacc",
+      "id": 1,
+      "mode": "dry",
+      "profile_name": "phase1_baseline",
+      "red_backend": "local_default",
+      "repeat_index": 1,
+      "run_cycles": 2,
+      "run_id": "0448208f91e34384a36447c0d5ebdacc",
+      "status": "completed"
+    },
+    {
+      "blue_backend": "local_default",
+      "case_id": "visual_case",
+      "decision_cadence_sec": 30,
+      "description": "Unsupported visual case.",
+      "detail": "visual attachments are not implemented in Phase 1 evaluation runs",
+      "evaluation_run_id": null,
+      "id": 2,
+      "mode": "dry",
+      "profile_name": "phase1_baseline",
+      "red_backend": "local_default",
+      "repeat_index": 1,
+      "run_cycles": 1,
+      "run_id": null,
+      "status": "skipped_unsupported"
+    }
+  ],
+  "completed_case_count": 1,
+  "failed_case_count": 0,
+  "generated_at": "2026-04-05 20:24:46.297361+00:00",
+  "profile_name": "phase1_baseline",
+  "skipped_case_count": 1
+}

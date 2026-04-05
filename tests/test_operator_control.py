@@ -154,6 +154,7 @@ def test_operator_control_summarizes_and_exports_replay_bundle(tmp_path: Path) -
     export_dir = tmp_path / "bundle"
     export = operator.export_replay_bundle(run_id, export_dir)
     comparison = operator.compare_runs(run_id, run_id)
+    replay_exports = store.list_replay_export_results(run_id)
 
     registry.close()
     olympus.close()
@@ -171,6 +172,11 @@ def test_operator_control_summarizes_and_exports_replay_bundle(tmp_path: Path) -
     assert "standing_order_history.jsonl" in manifest["file_inventory"]
     assert "evaluation_summary.json" in manifest["file_inventory"]
     assert "fairness_findings.jsonl" in manifest["file_inventory"]
+    assert replay_exports
+    assert replay_exports[-1].manifest_path == export.manifest_path
+    assert replay_exports[-1].includes_evaluation_summary is True
+    assert replay_exports[-1].includes_cycle_evaluations is True
+    assert replay_exports[-1].includes_fairness_findings is True
     assert run_summary["latest_decision_cycle"] == 1
     assert comparison.left_run_id == run_id
     assert timeline[0].red_execution_lifecycle_state == "completed"

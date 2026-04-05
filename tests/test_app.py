@@ -64,6 +64,7 @@ def test_bootstrap_application_without_external_dependencies(tmp_path: Path) -> 
     assert summary["dry_run"] is True
     assert summary["service_statuses"]["olympus_gateway"] == "client-ready"
     assert summary["service_statuses"]["dcs_grpc_gateway"] == "client-ready"
+    assert summary["service_statuses"]["integration_ingest"] == "integration-ingest-ready"
     assert summary["service_statuses"]["world_state"] == "world-state-ready"
     assert summary["service_statuses"]["sensor_fusion"] == "sensor-fusion-ready"
     assert summary["service_statuses"]["observation_builder"] == "observation-ready"

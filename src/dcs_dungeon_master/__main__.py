@@ -18,7 +18,7 @@ from dcs_dungeon_master.core.config import load_config
 from dcs_dungeon_master.core.enums import Coalition, FairnessReviewStatus
 from dcs_dungeon_master.evaluation import EvaluationService, build_evaluation_metadata
 from dcs_dungeon_master.execution import ExecutionEngine, LiveCommandLoopRunner
-from dcs_dungeon_master.integration import build_integration_services
+from dcs_dungeon_master.integration import IntegrationIngestCoordinator, build_integration_services
 from dcs_dungeon_master.integration.grpc_codegen import generate_vendored_stubs
 from dcs_dungeon_master.model_adapter import DryDecisionLoopRunner, build_model_registry
 from dcs_dungeon_master.observation import ObservationBuilder
@@ -26,7 +26,7 @@ from dcs_dungeon_master.operator_control import OperatorControlService
 from dcs_dungeon_master.persistence import SQLiteStateStore
 from dcs_dungeon_master.scenario_state.registry import get_scenario_definition
 from dcs_dungeon_master.sensor_fusion import SensorFusionService
-from dcs_dungeon_master.world_state import KnowledgeDebugView, WorldStateRepository
+from dcs_dungeon_master.world_state import KnowledgeDebugView, WorldStateRepository, WorldStateUpdater
 
 
 def _run_mode(config) -> str:
@@ -98,6 +98,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     check_integration = subparsers.add_parser("check-integration", help="Check Olympus and DCS-gRPC health.")
     add_config_argument(check_integration)
+
+    ingest_step = subparsers.add_parser(
+        "ingest-step",
+        help="Run one normalized Olympus/gRPC ingest step into world state.",
+    )
+    add_config_argument(ingest_step)
+    ingest_step.add_argument("--run-id", type=str, default=None, help="Optional run id. Defaults to the latest run.")
 
     world_state_summary = subparsers.add_parser("world-state-summary", help="Print current world-state summary.")
     add_config_argument(world_state_summary)
@@ -347,6 +354,14 @@ def build_parser() -> argparse.ArgumentParser:
     add_config_argument(eval_matrix_report)
     eval_matrix_report.add_argument("--profile", type=str, required=True)
 
+    eval_closeout_status = subparsers.add_parser(
+        "eval-closeout-status",
+        help="Verify Milestone 9 completion evidence for a run/profile.",
+    )
+    add_config_argument(eval_closeout_status)
+    eval_closeout_status.add_argument("--run-id", type=str, default=None, help="Optional run id. Defaults to the latest run.")
+    eval_closeout_status.add_argument("--profile", type=str, default=None)
+
     validate_grpc_contracts = subparsers.add_parser(
         "validate-grpc-contracts",
         help="Generate vendored gRPC stubs into a temporary location to validate the proto contracts.",
@@ -426,6 +441,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(json.dumps(payload, indent=2, sort_keys=True))
         return 0
 
+    if args.command == "ingest-step":
+        config = load_config(args.config)
+        scenario = get_scenario_definition(config.scenario.id, config.scenario.registry_path)
+        store = SQLiteStateStore(config.persistence.db_path, enable_wal=config.persistence.enable_wal)
+        resolved_run_id = args.run_id or store.get_latest_run_id()
+        integrations = build_integration_services(config.dcs)
+        coordinator = IntegrationIngestCoordinator(integrations, WorldStateUpdater(WorldStateRepository(store), scenario))
+        try:
+            payload = coordinator.ingest_once(resolved_run_id)
+        finally:
+            integrations.close()
+        _print_payload(payload)
+        return 0
+
     if args.command == "world-state-summary":
         config = load_config(args.config)
         store = SQLiteStateStore(config.persistence.db_path, enable_wal=config.persistence.enable_wal)
@@ -472,7 +501,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         scenario = get_scenario_definition(config.scenario.id, config.scenario.registry_path)
         store = SQLiteStateStore(config.persistence.db_path, enable_wal=config.persistence.enable_wal)
         resolved_run_id = args.run_id or store.get_latest_run_id()
-        builder = ObservationBuilder(store, scenario, SensorFusionService(store, scenario, config.fog_of_war))
+        builder = ObservationBuilder(store, scenario, SensorFusionService(store, scenario, config.fog_of_war), config.multimodal)
         artifact = builder.build_observation(
             resolved_run_id,
             Coalition(args.coalition),
@@ -487,7 +516,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         scenario = get_scenario_definition(config.scenario.id, config.scenario.registry_path)
         store = SQLiteStateStore(config.persistence.db_path, enable_wal=config.persistence.enable_wal)
         resolved_run_id = args.run_id or store.get_latest_run_id()
-        builder = ObservationBuilder(store, scenario, SensorFusionService(store, scenario, config.fog_of_war))
+        builder = ObservationBuilder(store, scenario, SensorFusionService(store, scenario, config.fog_of_war), config.multimodal)
         red_artifact, blue_artifact = builder.build_observation_pair(
             resolved_run_id,
             args.decision_cycle,
@@ -504,7 +533,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         config = load_config(args.config)
         scenario = get_scenario_definition(config.scenario.id, config.scenario.registry_path)
         store = SQLiteStateStore(config.persistence.db_path, enable_wal=config.persistence.enable_wal)
-        builder = ObservationBuilder(store, scenario, SensorFusionService(store, scenario, config.fog_of_war))
+        builder = ObservationBuilder(store, scenario, SensorFusionService(store, scenario, config.fog_of_war), config.multimodal)
         payload = builder.summarize_latest(args.run_id or store.get_latest_run_id(), Coalition(args.coalition))
         print(json.dumps(payload, indent=2, sort_keys=True, default=str))
         return 0
@@ -513,7 +542,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         config = load_config(args.config)
         scenario = get_scenario_definition(config.scenario.id, config.scenario.registry_path)
         store = SQLiteStateStore(config.persistence.db_path, enable_wal=config.persistence.enable_wal)
-        builder = ObservationBuilder(store, scenario, SensorFusionService(store, scenario, config.fog_of_war))
+        builder = ObservationBuilder(store, scenario, SensorFusionService(store, scenario, config.fog_of_war), config.multimodal)
         payload = builder.render_latest(args.run_id or store.get_latest_run_id(), Coalition(args.coalition), args.format)
         if isinstance(payload, str):
             print(payload)
@@ -553,7 +582,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         scenario = get_scenario_definition(config.scenario.id, config.scenario.registry_path)
         store = SQLiteStateStore(config.persistence.db_path, enable_wal=config.persistence.enable_wal)
         sensor_fusion = SensorFusionService(store, scenario, config.fog_of_war)
-        observation_builder = ObservationBuilder(store, scenario, sensor_fusion)
+        observation_builder = ObservationBuilder(store, scenario, sensor_fusion, config.multimodal)
         validator = ActionValidator(store, scenario)
         integrations = build_integration_services(config.dcs)
         registry = build_model_registry(config)
@@ -582,13 +611,23 @@ def main(argv: Sequence[str] | None = None) -> int:
             payload = {
                 "health": [asdict(item) for item in registry.check_health()],
                 "capabilities": [asdict(item) for item in registry.describe_backends()],
+                "routing": {
+                    "red": {
+                        "primary": config.model_routing.red_backend,
+                        "fallback": config.model_routing.red_fallback_backend,
+                    },
+                    "blue": {
+                        "primary": config.model_routing.blue_backend,
+                        "fallback": config.model_routing.blue_fallback_backend,
+                    },
+                },
             }
         finally:
             registry.close()
         print(json.dumps(payload, indent=2, sort_keys=True, default=str))
         return 0
 
-    if args.command in {"eval-run", "eval-summary", "eval-compare", "eval-review-queue", "eval-review", "eval-run-matrix", "eval-matrix-report"}:
+    if args.command in {"eval-run", "eval-summary", "eval-compare", "eval-review-queue", "eval-review", "eval-run-matrix", "eval-matrix-report", "eval-closeout-status"}:
         config = load_config(args.config)
         scenario = get_scenario_definition(config.scenario.id, config.scenario.registry_path)
         store = SQLiteStateStore(config.persistence.db_path, enable_wal=config.persistence.enable_wal)
@@ -613,6 +652,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                     f"Configured evaluation profile is '{config.evaluation.profile_name}', got '{args.profile}'."
                 )
             payload = evaluation.run_matrix(config)
+        elif args.command == "eval-closeout-status":
+            payload = evaluation.milestone9_completion_status(args.run_id or store.get_latest_run_id(), args.profile)
         else:
             payload = evaluation.get_matrix_report(args.profile)
         _print_payload(payload)
@@ -657,12 +698,21 @@ def main(argv: Sequence[str] | None = None) -> int:
         store = SQLiteStateStore(config.persistence.db_path, enable_wal=config.persistence.enable_wal)
         resolved_run_id = args.run_id or store.get_latest_run_id()
         operator = OperatorControlService(store)
-        observation_builder = ObservationBuilder(store, scenario, SensorFusionService(store, scenario, config.fog_of_war))
+        world_repository = WorldStateRepository(store)
+        world_updater = WorldStateUpdater(world_repository, scenario)
+        observation_builder = ObservationBuilder(store, scenario, SensorFusionService(store, scenario, config.fog_of_war), config.multimodal)
         validator = ActionValidator(store, scenario)
+        integrations = build_integration_services(config.dcs)
         registry = build_model_registry(config)
         try:
             operator.ensure_cycle_allowed(resolved_run_id)
-            runner = DryDecisionLoopRunner(store, observation_builder, validator, registry)
+            runner = DryDecisionLoopRunner(
+                store,
+                observation_builder,
+                validator,
+                registry,
+                IntegrationIngestCoordinator(integrations, world_updater),
+            )
             cycle = runner.run_decision_cycle(
                 resolved_run_id,
                 args.decision_cycle,
@@ -672,6 +722,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _handle_loop_failure(operator, resolved_run_id, exc)
         finally:
             registry.close()
+            integrations.close()
         _print_payload(cycle)
         return 0
 
@@ -681,12 +732,21 @@ def main(argv: Sequence[str] | None = None) -> int:
         store = SQLiteStateStore(config.persistence.db_path, enable_wal=config.persistence.enable_wal)
         resolved_run_id = args.run_id or store.get_latest_run_id()
         operator = OperatorControlService(store)
-        observation_builder = ObservationBuilder(store, scenario, SensorFusionService(store, scenario, config.fog_of_war))
+        world_repository = WorldStateRepository(store)
+        world_updater = WorldStateUpdater(world_repository, scenario)
+        observation_builder = ObservationBuilder(store, scenario, SensorFusionService(store, scenario, config.fog_of_war), config.multimodal)
         validator = ActionValidator(store, scenario)
+        integrations = build_integration_services(config.dcs)
         registry = build_model_registry(config)
         try:
             operator.ensure_cycle_allowed(resolved_run_id)
-            runner = DryDecisionLoopRunner(store, observation_builder, validator, registry)
+            runner = DryDecisionLoopRunner(
+                store,
+                observation_builder,
+                validator,
+                registry,
+                IntegrationIngestCoordinator(integrations, world_updater),
+            )
             payload = runner.run_decision_loop(
                 resolved_run_id,
                 start_decision_cycle=args.start_decision_cycle,
@@ -697,6 +757,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _handle_loop_failure(operator, resolved_run_id, exc)
         finally:
             registry.close()
+            integrations.close()
         _print_payload(payload)
         return 0
 
@@ -704,7 +765,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         config = load_config(args.config)
         scenario = get_scenario_definition(config.scenario.id, config.scenario.registry_path)
         store = SQLiteStateStore(config.persistence.db_path, enable_wal=config.persistence.enable_wal)
-        observation_builder = ObservationBuilder(store, scenario, SensorFusionService(store, scenario, config.fog_of_war))
+        observation_builder = ObservationBuilder(store, scenario, SensorFusionService(store, scenario, config.fog_of_war), config.multimodal)
         validator = ActionValidator(store, scenario)
         registry = build_model_registry(config)
         try:
@@ -721,14 +782,23 @@ def main(argv: Sequence[str] | None = None) -> int:
         store = SQLiteStateStore(config.persistence.db_path, enable_wal=config.persistence.enable_wal)
         resolved_run_id = args.run_id or store.get_latest_run_id()
         operator = OperatorControlService(store)
-        observation_builder = ObservationBuilder(store, scenario, SensorFusionService(store, scenario, config.fog_of_war))
+        world_repository = WorldStateRepository(store)
+        world_updater = WorldStateUpdater(world_repository, scenario)
+        observation_builder = ObservationBuilder(store, scenario, SensorFusionService(store, scenario, config.fog_of_war), config.multimodal)
         validator = ActionValidator(store, scenario)
         integrations = build_integration_services(config.dcs)
         registry = build_model_registry(config)
         try:
             operator.ensure_cycle_allowed(resolved_run_id)
             execution_engine = ExecutionEngine(store, scenario, integrations.olympus)
-            runner = LiveCommandLoopRunner(store, observation_builder, validator, registry, execution_engine)
+            runner = LiveCommandLoopRunner(
+                store,
+                observation_builder,
+                validator,
+                registry,
+                execution_engine,
+                IntegrationIngestCoordinator(integrations, world_updater),
+            )
             cycle = runner.run_live_cycle(
                 resolved_run_id,
                 args.decision_cycle,
@@ -748,14 +818,23 @@ def main(argv: Sequence[str] | None = None) -> int:
         store = SQLiteStateStore(config.persistence.db_path, enable_wal=config.persistence.enable_wal)
         resolved_run_id = args.run_id or store.get_latest_run_id()
         operator = OperatorControlService(store)
-        observation_builder = ObservationBuilder(store, scenario, SensorFusionService(store, scenario, config.fog_of_war))
+        world_repository = WorldStateRepository(store)
+        world_updater = WorldStateUpdater(world_repository, scenario)
+        observation_builder = ObservationBuilder(store, scenario, SensorFusionService(store, scenario, config.fog_of_war), config.multimodal)
         validator = ActionValidator(store, scenario)
         integrations = build_integration_services(config.dcs)
         registry = build_model_registry(config)
         try:
             operator.ensure_cycle_allowed(resolved_run_id)
             execution_engine = ExecutionEngine(store, scenario, integrations.olympus)
-            runner = LiveCommandLoopRunner(store, observation_builder, validator, registry, execution_engine)
+            runner = LiveCommandLoopRunner(
+                store,
+                observation_builder,
+                validator,
+                registry,
+                execution_engine,
+                IntegrationIngestCoordinator(integrations, world_updater),
+            )
             payload = runner.run_live_loop(
                 resolved_run_id,
                 start_decision_cycle=args.start_decision_cycle,

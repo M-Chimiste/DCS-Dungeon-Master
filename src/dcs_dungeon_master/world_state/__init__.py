@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, is_dataclass
 from datetime import UTC, datetime
 from math import asin, cos, radians, sin, sqrt
 from typing import Any
@@ -122,7 +122,7 @@ class WorldStateUpdater:
                     sector_id=None,
                     occurred_at=timestamp,
                     summary=f"Mission snapshot at {mission_snapshot.mission_time or 'unknown_time'}",
-                    payload=asdict(mission_snapshot),
+                    payload=_serialize_payload(mission_snapshot),
                 )
             )
 
@@ -139,7 +139,7 @@ class WorldStateUpdater:
                     sector_id=None,
                     occurred_at=timestamp,
                     summary=f"gRPC mission metadata at {grpc_metadata.mission_time}",
-                    payload=asdict(grpc_metadata),
+                    payload=_serialize_payload(grpc_metadata),
                 )
             )
 
@@ -179,7 +179,7 @@ class WorldStateUpdater:
                     sector_id=sector_id,
                     occurred_at=timestamp,
                     summary=f"Olympus unit snapshot for {group_id}",
-                    payload=asdict(snapshot) | {"observed_by": coalition.value if coalition else None},
+                    payload=_serialize_payload(snapshot) | {"observed_by": coalition.value if coalition else None},
                 )
             )
 
@@ -208,7 +208,7 @@ class WorldStateUpdater:
                     sector_id=sector_id,
                     occurred_at=timestamp,
                     summary=f"Olympus airfield snapshot for {control_point_id}",
-                    payload=asdict(snapshot),
+                    payload=_serialize_payload(snapshot),
                 )
             )
 
@@ -339,6 +339,16 @@ def _optional_str(value: object) -> str | None:
 def _payload_sector(payload: dict[str, Any]) -> str | None:
     sector_id = payload.get("sector_id")
     return sector_id if isinstance(sector_id, str) and sector_id.strip() else None
+
+
+def _serialize_payload(value: Any) -> dict[str, Any]:
+    if is_dataclass(value):
+        return asdict(value)
+    if isinstance(value, dict):
+        return dict(value)
+    if hasattr(value, "__dict__"):
+        return {key: val for key, val in vars(value).items() if not key.startswith("_")}
+    return {"value": value}
 
 
 def _is_high_value_group(unit_type: str | None, category: str | None) -> bool:

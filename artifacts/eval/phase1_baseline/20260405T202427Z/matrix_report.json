@@ -1,0 +1,41 @@
+{
+  "case_results": [
+    {
+      "blue_backend": "blue_backend",
+      "case_id": "dry_case",
+      "decision_cadence_sec": 30,
+      "description": "Dry matrix case",
+      "detail": "Replay export target 'artifacts/eval/phase1_baseline/20260405T202427Z/dry_case_repeat_1' must be empty.",
+      "evaluation_run_id": null,
+      "id": 1,
+      "mode": "dry",
+      "profile_name": "phase1_baseline",
+      "red_backend": "red_backend",
+      "repeat_index": 1,
+      "run_cycles": 1,
+      "run_id": "124da2e44d2e4b09905c2639721a9775",
+      "status": "failed"
+    },
+    {
+      "blue_backend": "blue_backend",
+      "case_id": "visual_case",
+      "decision_cadence_sec": 30,
+      "description": "Visual matrix case",
+      "detail": "visual attachments are not implemented in Phase 1 evaluation runs",
+      "evaluation_run_id": null,
+      "id": 2,
+      "mode": "dry",
+      "profile_name": "phase1_baseline",
+      "red_backend": "red_backend",
+      "repeat_index": 1,
+      "run_cycles": 1,
+      "run_id": null,
+      "status": "skipped_unsupported"
+    }
+  ],
+  "completed_case_count": 0,
+  "failed_case_count": 1,
+  "generated_at": "2026-04-05 20:24:27.640276+00:00",
+  "profile_name": "phase1_baseline",
+  "skipped_case_count": 1
+}

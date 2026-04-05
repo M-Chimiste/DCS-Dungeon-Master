@@ -13,6 +13,7 @@ from dcs_dungeon_master.core.enums import (
     GroupPosture,
     RejectionCode,
     SectorPriority,
+    ValidationEvidenceBasis,
     ValidationStatus,
 )
 from dcs_dungeon_master.core.exceptions import PersistenceError
@@ -35,7 +36,6 @@ from dcs_dungeon_master.core.models import (
     ValidationContext,
     ValidationAuditEvidence,
     ValidationMessage,
-    WorldControlPointState,
     WorldGroupState,
 )
 from dcs_dungeon_master.persistence import SQLiteStateStore
@@ -234,6 +234,10 @@ class ActionValidator:
             latest_observation = self.store.get_latest_observation(run_id, coalition)
         except PersistenceError:
             latest_observation = None
+        try:
+            latest_knowledge = self.store.get_knowledge_state(coalition, run_id) if latest_observation is not None else None
+        except PersistenceError:
+            latest_knowledge = None
         return ValidationContext(
             run_id=run_id,
             coalition=coalition,
@@ -244,6 +248,7 @@ class ActionValidator:
             reserve_groups=self.store.get_reserve_groups(run_id),
             world_state=self.store.get_world_state_snapshot(run_id),
             latest_observation=latest_observation,
+            latest_knowledge=latest_knowledge,
         )
 
     def _build_audit_entry(
@@ -262,7 +267,7 @@ class ActionValidator:
         if latest_observation_id is not None:
             evidence.append(
                 ValidationAuditEvidence(
-                    source_type="latest_observation",
+                    source_type=ValidationEvidenceBasis.COALITION_VISIBLE,
                     identifier=str(latest_observation_id),
                     detail="Validation linked to the latest persisted coalition observation for this command stream.",
                 )
@@ -270,21 +275,25 @@ class ActionValidator:
         if sector_id := params.get("sector_id") or params.get("target_sector_id"):
             evidence.append(
                 ValidationAuditEvidence(
-                    source_type="scenario_known",
+                    source_type=ValidationEvidenceBasis.SCENARIO_KNOWN,
                     identifier=str(sector_id),
                     detail="Sector legality was checked against the authored scenario graph and restrictions.",
                 )
             )
         if destination_id := params.get("destination_id") or params.get("fallback_destination_id"):
             destination_type = params.get("destination_type") or params.get("fallback_destination_type")
-            source_type = "scenario_known" if destination_type in {"sector", "zone", "control_point"} else "coalition_owned"
+            source_type = (
+                ValidationEvidenceBasis.SCENARIO_KNOWN
+                if destination_type in {"sector", "zone", "control_point"}
+                else ValidationEvidenceBasis.COALITION_OWNED
+            )
             evidence.append(
                 ValidationAuditEvidence(
                     source_type=source_type,
                     identifier=str(destination_id),
                     detail=(
                         "Destination legality was checked using scenario-authored sectors/zones/control points."
-                        if source_type == "scenario_known"
+                        if source_type is ValidationEvidenceBasis.SCENARIO_KNOWN
                         else "Destination legality was checked against coalition-owned state."
                     ),
                 )
@@ -292,15 +301,15 @@ class ActionValidator:
         if control_point_id := params.get("control_point_id"):
             evidence.append(
                 ValidationAuditEvidence(
-                    source_type="scenario_known",
+                    source_type=ValidationEvidenceBasis.COALITION_VISIBLE,
                     identifier=str(control_point_id),
-                    detail="Control-point identity was resolved from the active authored scenario.",
+                    detail="Control-point legality was resolved from the authored scenario plus the latest coalition-visible picture.",
                 )
             )
         if group_id := params.get("group_id"):
             evidence.append(
                 ValidationAuditEvidence(
-                    source_type="coalition_owned",
+                    source_type=ValidationEvidenceBasis.COALITION_OWNED,
                     identifier=str(group_id),
                     detail="Group ownership, mobility, and availability were checked only against this coalition's controllable groups.",
                 )
@@ -308,7 +317,7 @@ class ActionValidator:
         for group_id in params.get("group_ids", []) if isinstance(params.get("group_ids"), list) else []:
             evidence.append(
                 ValidationAuditEvidence(
-                    source_type="coalition_owned",
+                    source_type=ValidationEvidenceBasis.COALITION_OWNED,
                     identifier=str(group_id),
                     detail="Reinforcement group membership was checked against coalition-owned active groups.",
                 )
@@ -316,14 +325,14 @@ class ActionValidator:
         if reserve_group_id := params.get("reserve_group_id"):
             evidence.append(
                 ValidationAuditEvidence(
-                    source_type="coalition_owned",
+                    source_type=ValidationEvidenceBasis.COALITION_OWNED,
                     identifier=str(reserve_group_id),
                     detail="Reserve ownership, availability, and budget fit were checked against coalition state only.",
                 )
             )
         evidence.append(
             ValidationAuditEvidence(
-                source_type="anti_cheat_boundary",
+                source_type=ValidationEvidenceBasis.ANTI_CHEAT_BOUNDARY,
                 identifier=None,
                 detail="No hidden enemy world-state facts were required to accept or reject this action.",
             )
@@ -523,7 +532,6 @@ class ActionValidator:
         active_by_id = {group.id: group for group in context.active_groups}
         reserve_by_id = {group.id: group for group in context.reserve_groups}
         world_group_by_id = {group.id: group for group in context.world_state.groups}
-        world_control_by_id = {point.control_point_id: point for point in context.world_state.control_points}
         params = working.normalized_params
 
         def require_owned_group(group_id: str) -> ActiveGroupState:
@@ -559,11 +567,10 @@ class ActionValidator:
                         RejectionCode.UNKNOWN_ENTITY,
                         f"Unknown control point '{params['control_point_id']}'.",
                     )
-                owner = world_control_by_id.get(control_point.id, WorldControlPointState(control_point.id, control_point.owner, control_point.sector_id)).owner
-                if owner not in {None, context.coalition}:
+                if self._visible_control_point_status(context, control_point.id) not in {"friendly", "contested"}:
                     raise _ValidationAbort(
                         RejectionCode.ENTITY_NOT_OWNED,
-                        f"Control point '{control_point.id}' is not friendly or contested for {context.coalition.value}.",
+                        f"Control point '{control_point.id}' is not visible as friendly or contested for {context.coalition.value}.",
                     )
                 for group_id in params["group_ids"]:
                     require_owned_group(group_id)
@@ -582,7 +589,6 @@ class ActionValidator:
     ) -> None:
         params = working.normalized_params
         world_group_by_id = {group.id: group for group in context.world_state.groups}
-        world_control_by_id = {point.control_point_id: point for point in context.world_state.control_points}
         try:
             if parsed.action_type == ActionType.SET_SECTOR_PRIORITY:
                 self._require_sector(params["sector_id"])
@@ -604,11 +610,10 @@ class ActionValidator:
                 self._require_active_group(context.active_groups, params["group_id"])
             elif parsed.action_type == ActionType.REINFORCE_CONTROL_POINT:
                 control_point = self._require_control_point(params["control_point_id"])
-                owner = world_control_by_id.get(control_point.id)
-                if owner is not None and owner.owner not in {None, context.coalition}:
+                if self._visible_control_point_status(context, control_point.id) not in {"friendly", "contested"}:
                     raise _ValidationAbort(
                         RejectionCode.DESTINATION_RESTRICTED,
-                        f"Control point '{control_point.id}' is not legal for reinforcement.",
+                        f"Control point '{control_point.id}' is not coalition-visible as a legal reinforcement target.",
                     )
                 for group_id in params["group_ids"]:
                     group = self._require_active_group(context.active_groups, group_id)
@@ -871,6 +876,18 @@ class ActionValidator:
         if control_point is None:
             raise _ValidationAbort(RejectionCode.UNKNOWN_ENTITY, f"Unknown control point '{control_point_id}'.")
         return control_point
+
+    def _visible_control_point_status(self, context: ValidationContext, control_point_id: str) -> str:
+        if context.latest_observation is not None:
+            for item in context.latest_observation.observation.scenario_state.known_control_points:
+                if item.id == control_point_id:
+                    return item.status
+        control_point = self._require_control_point(control_point_id)
+        if control_point.owner is context.coalition:
+            return "friendly"
+        if control_point.owner is None:
+            return "contested"
+        return "enemy"
 
     def _require_active_group(
         self,

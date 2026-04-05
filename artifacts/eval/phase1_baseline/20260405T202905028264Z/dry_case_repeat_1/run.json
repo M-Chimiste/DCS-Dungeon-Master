@@ -1,0 +1,165 @@
+{
+  "blue_backend_name": "local_default",
+  "config_digest": "25cc3914351876b49e4e1c2c231581e204de7c17dca7258cc5fce3887eff47f9",
+  "config_snapshot": {
+    "dcs": {
+      "grpc": {
+        "host": "127.0.0.1",
+        "port": 50051,
+        "retry_attempts": 1,
+        "secure": false,
+        "server_host_override": null,
+        "timeout_sec": 5.0
+      },
+      "olympus": {
+        "base_url": "http://127.0.0.1:4512",
+        "health_path": "/olympus/mission",
+        "password_env_var": null,
+        "retry_attempts": 1,
+        "timeout_sec": 5.0,
+        "token_env_var": null,
+        "username": null,
+        "verify_tls": true
+      },
+      "remote_hosted": false
+    },
+    "dry_run": {
+      "enabled": true,
+      "summary_output": "text"
+    },
+    "evaluation": {
+      "decision_cadence_sec": 30,
+      "default_run_cycles": 4,
+      "fairness_mode": "hybrid",
+      "matrix_cases": [
+        {
+          "blue_backend": "local_default",
+          "decision_cadence_sec": 30,
+          "description": "Dry matrix case.",
+          "id": "dry_case",
+          "mode": "dry",
+          "red_backend": "local_default",
+          "repeat_count": 1,
+          "run_cycles": 2,
+          "system_prompt_variant_override": null,
+          "visual_attachment": false
+        },
+        {
+          "blue_backend": "local_default",
+          "decision_cadence_sec": 30,
+          "description": "Unsupported visual case.",
+          "id": "visual_case",
+          "mode": "dry",
+          "red_backend": "local_default",
+          "repeat_count": 1,
+          "run_cycles": 1,
+          "system_prompt_variant_override": null,
+          "visual_attachment": true
+        }
+      ],
+      "notes": null,
+      "profile_name": "phase1_baseline",
+      "prompt_version": "phase1_default",
+      "resource_settings_version": "phase1_default",
+      "review_policy": "suspicious_only",
+      "scenario_seed": null
+    },
+    "fog_of_war": {
+      "adjacency_drift_enabled": true,
+      "archive_window_sec": 1800,
+      "debug_truth_comparison": false,
+      "decay_window_sec": 900,
+      "freshness_window_sec": 300,
+      "inference_mode": "conservative"
+    },
+    "logging": {
+      "format": "text",
+      "level": "INFO"
+    },
+    "model_routing": {
+      "blue_backend": "local_default",
+      "blue_fallback_backend": "hosted_default",
+      "red_backend": "local_default",
+      "red_fallback_backend": "hosted_default"
+    },
+    "models": [
+      {
+        "api_key_env_var": null,
+        "enabled": true,
+        "endpoint": "http://127.0.0.1:1234/v1",
+        "hosting_mode": "local",
+        "max_output_tokens": null,
+        "max_retries": 1,
+        "model": "gemma-4-26b-a4b-it",
+        "multimodal": true,
+        "name": "local_default",
+        "system_prompt_variant": null,
+        "temperature": 0.2,
+        "timeout_sec": 30.0
+      },
+      {
+        "api_key_env_var": null,
+        "enabled": true,
+        "endpoint": "https://api.example.test/v1",
+        "hosting_mode": "hosted",
+        "max_output_tokens": null,
+        "max_retries": 1,
+        "model": "gpt-5",
+        "multimodal": false,
+        "name": "hosted_default",
+        "system_prompt_variant": null,
+        "temperature": 0.2,
+        "timeout_sec": 30.0
+      }
+    ],
+    "multimodal": {
+      "enabled": true,
+      "output_dir": ".cache/test-attachments"
+    },
+    "persistence": {
+      "db_path": "/private/var/folders/9d/0m0dj3d57wx23n4kwncb7hrm0000gn/T/pytest-of-c/pytest-37/test_evaluation_cli_and_matrix0/state.sqlite3",
+      "enable_wal": true
+    },
+    "runtime": {
+      "app_name": "dcs_dungeon_master",
+      "dry_run": true,
+      "environment": "test"
+    },
+    "scenario": {
+      "id": "phase1_baseline_persian_gulf",
+      "registry_path": "scenarios/index.toml"
+    }
+  },
+  "created_at": "2026-04-05T20:29:05.029200+00:00",
+  "evaluation_metadata": {
+    "action_schema_version": "0.1",
+    "blue_hosting_mode": "local",
+    "blue_model_identifier": "gemma-4-26b-a4b-it",
+    "decision_cadence_sec": 30,
+    "default_run_cycles": 4,
+    "fairness_mode": "hybrid",
+    "notes": "matrix_case=dry_case;repeat=1",
+    "observation_schema_version": "0.1",
+    "profile_name": "phase1_baseline",
+    "prompt_version": "phase1_default",
+    "red_hosting_mode": "local",
+    "red_model_identifier": "gemma-4-26b-a4b-it",
+    "resource_settings_version": "phase1_default",
+    "review_policy": "suspicious_only",
+    "scenario_seed": null
+  },
+  "failed_at": null,
+  "mode": "dry",
+  "paused_at": null,
+  "red_backend_name": "local_default",
+  "resumed_at": null,
+  "run_id": "6850c3eaa54848b1b147242e22156be4",
+  "scenario_id": "phase1_baseline_persian_gulf",
+  "scenario_name": "Phase 1 Baseline: Persian Gulf Frontier",
+  "scenario_version": "1",
+  "started_at": null,
+  "status": "created",
+  "stopped_at": null,
+  "terminal_reason": null,
+  "theater": "Persian Gulf"
+}

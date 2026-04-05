@@ -272,6 +272,7 @@ class OperatorControlService:
         if output_path.exists() and any(output_path.iterdir()):
             raise PersistenceError(f"Replay export target '{output_path}' must be empty.")
         output_path.mkdir(parents=True, exist_ok=True)
+        exported_at = datetime.now(UTC)
 
         run = self.get_status(resolved_run_id)
         summary = self.summarize_run(resolved_run_id)
@@ -377,7 +378,7 @@ class OperatorControlService:
             bundle_version="phase1_run_bundle_v1",
             run_id=resolved_run_id,
             scenario_id=run.scenario_id,
-            exported_at=datetime.now(UTC),
+            exported_at=exported_at,
             file_inventory=files,
             comparison_metadata={
                 "scenario_id": run.scenario_id,
@@ -394,12 +395,20 @@ class OperatorControlService:
             },
         )
         self._write_json(output_path / "manifest.json", manifest)
-        return ReplayExportResult(
+        result = ReplayExportResult(
             run_id=resolved_run_id,
             output_dir=str(output_path),
             manifest_path=str(output_path / "manifest.json"),
             file_count=len(files),
+            exported_at=exported_at,
+            file_inventory=files,
+            includes_evaluation_summary=evaluation_summary is not None,
+            includes_cycle_evaluations=evaluation_summary is not None,
+            includes_fairness_findings=evaluation_summary is not None,
+            includes_matrix_report=matrix_report is not None,
         )
+        self.store.save_replay_export_result(result)
+        return result
 
     def compare_runs(self, left_run_id: str, right_run_id: str) -> RunComparisonResult:
         left = self.summarize_run(left_run_id)

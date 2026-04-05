@@ -12,16 +12,16 @@ Draft 0.1
 
 - `Milestone 0`: `implemented`
 - `Milestone 1`: `implemented`
-- `Milestone 2`: `implemented_with_gaps`
+- `Milestone 2`: `implemented`
 - `Milestone 3`: `implemented`
-- `Milestone 4`: `implemented_with_gaps`
-- `Milestone 5`: `implemented_with_gaps`
-- `Milestone 6`: `implemented_with_gaps`
+- `Milestone 4`: `implemented`
+- `Milestone 5`: `implemented`
+- `Milestone 6`: `implemented`
 - `Milestone 7`: `implemented`
 - `Milestone 8`: `implemented`
-- `Milestone 9`: `implemented`
+- `Milestone 9`: `implemented_with_gaps`
 
-The `implemented_with_gaps` milestones are working in the repo, but still have targeted hardening and alignment tasks tracked in the current gap-mitigation pass.
+The remaining `implemented_with_gaps` milestone is working in the repo, but still needs a real operational baseline matrix run and checked-in tuning/report artifacts before it should be treated as fully signed off.
 
 ## Purpose
 
