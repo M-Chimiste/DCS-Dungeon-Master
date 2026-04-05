@@ -117,10 +117,49 @@ uv run dcs-dungeon-master check-integration --config config/milestone0.toml
 uv run dcs-dungeon-master run-live-cycle --config config/milestone0.toml --decision-cycle 1
 ```
 
+## 8. Web UI
+
+Start the backend API:
+
+```bash
+uv run dcs-dungeon-master serve-web-ui --config config/milestone0.toml
+```
+
+Then start the frontend:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Open:
+
+- [http://127.0.0.1:5173/studio](http://127.0.0.1:5173/studio) for Campaign Studio
+- [http://127.0.0.1:5173/ops](http://127.0.0.1:5173/ops) for Live Ops
+
+Recommended Milestone 10.1 demo sequence:
+
+1. Open `Studio`
+2. Select a scenario and create a draft
+3. Click sectors and control points directly on the map
+4. Change a sector radius, move an active group, or toggle reserve allowed sectors
+5. Wait for the auto-save badge to settle on `Saved`
+6. Run `Validate` and click any returned issue to jump back to the affected object
+7. Open `Ops`, toggle layers, and use `Refresh Now` after a dry or live cycle
+
+If you only want to smoke-test the API, these should respond with JSON:
+
+```bash
+curl http://127.0.0.1:8080/api/scenarios
+curl http://127.0.0.1:8080/api/runs
+```
+
 ## Notes
 
 - Default SQLite state lives at `.cache/dcs-dungeon-master/state.sqlite3`
 - Default primary model backend is `local_default`
 - Default fallback backend is `hosted_default`
 - Multimodal is disabled globally by default
+- The Python web server will serve a simple fallback page if `frontend/dist` does not exist; use Vite dev mode for the actual React UI during development
 - Milestone 9 tooling is implemented, but true sign-off still requires a real baseline matrix run against live endpoints

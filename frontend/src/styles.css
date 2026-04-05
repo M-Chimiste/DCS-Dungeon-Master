@@ -1,0 +1,413 @@
+:root {
+  color: #1b2634;
+  background:
+    radial-gradient(circle at top left, rgba(230, 216, 177, 0.9), transparent 32%),
+    linear-gradient(180deg, #f3ecdb 0%, #e8dcc5 100%);
+  font-family: "Iowan Old Style", "Palatino Linotype", serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+.shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  padding: 1.25rem 1.5rem 1rem;
+  border-bottom: 1px solid rgba(114, 84, 58, 0.28);
+  background: rgba(255, 250, 242, 0.65);
+  backdrop-filter: blur(10px);
+}
+
+.topbar h1 {
+  margin: 0;
+  font-size: 2rem;
+}
+
+.eyebrow {
+  margin: 0 0 0.25rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-size: 0.72rem;
+  color: #8c2f39;
+}
+
+.nav {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.tab,
+button {
+  border: 1px solid rgba(93, 56, 29, 0.24);
+  background: #f9f0da;
+  color: #2f2a24;
+  padding: 0.72rem 1rem;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.tab.active,
+button:hover {
+  background: #8c2f39;
+  color: #fffdf8;
+}
+
+.page {
+  flex: 1;
+  padding: 1rem;
+}
+
+.grid {
+  display: grid;
+  gap: 1rem;
+}
+
+.studio-grid,
+.ops-grid {
+  grid-template-columns: 280px minmax(0, 1fr) 340px;
+}
+
+.rail,
+.canvas-column {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.panel,
+.map-card {
+  background: rgba(255, 250, 243, 0.75);
+  border: 1px solid rgba(114, 84, 58, 0.25);
+  border-radius: 18px;
+  padding: 1rem;
+  box-shadow: 0 18px 40px rgba(74, 56, 40, 0.08);
+}
+
+.panel h2,
+.panel h3 {
+  margin-top: 0;
+}
+
+.panel pre {
+  overflow: auto;
+  max-height: 280px;
+  background: #f7efd9;
+  padding: 0.75rem;
+  border-radius: 12px;
+  font-size: 0.84rem;
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.list-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.2rem;
+  border-radius: 16px;
+}
+
+.state-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 0.3rem 0.75rem;
+  font-size: 0.8rem;
+  background: #efe4c9;
+  color: #5d381d;
+}
+
+.state-badge.dirty {
+  background: #f1d49a;
+}
+
+.state-badge.saving {
+  background: #c9d9f0;
+}
+
+.state-badge.saved {
+  background: #d6ead8;
+}
+
+.state-badge.error {
+  background: #efd2d2;
+  color: #8c2f39;
+}
+
+.list-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+}
+
+.button-row {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.muted {
+  color: #6f6256;
+}
+
+.map-title {
+  margin-bottom: 0.75rem;
+  font-weight: 700;
+}
+
+.map-svg {
+  width: 100%;
+  height: auto;
+}
+
+.sector-ring {
+  stroke: #5d381d;
+  stroke-width: 2;
+  fill-opacity: 0.5;
+  transition: transform 120ms ease, stroke-width 120ms ease, filter 120ms ease;
+}
+
+.sector-ring.interactive,
+.control-point.interactive {
+  cursor: pointer;
+}
+
+.sector-ring:hover,
+.control-point:hover {
+  filter: brightness(1.05);
+}
+
+.sector-ring.selected,
+.control-point.selected {
+  stroke-width: 3;
+  filter: drop-shadow(0 0 8px rgba(140, 47, 57, 0.32));
+}
+
+.sector-front {
+  fill: #d47a62;
+}
+
+.sector-rear {
+  fill: #6d9f71;
+}
+
+.sector-support {
+  fill: #7390bb;
+}
+
+.sector-contested {
+  fill: #d9a441;
+}
+
+.sector-air_corridor {
+  fill: #b688cc;
+}
+
+.sector-label,
+.marker-label {
+  fill: #1f2937;
+  font-size: 12px;
+}
+
+.control-point {
+  fill: #1f2937;
+  stroke: #f8f4ec;
+  stroke-width: 1.5;
+}
+
+.world-group {
+  stroke: #fdf8ef;
+  stroke-width: 1.5;
+}
+
+.world-group.red {
+  fill: #8c2f39;
+}
+
+.world-group.blue {
+  fill: #2b6cb0;
+}
+
+.world-group.unknown {
+  fill: #4b5563;
+}
+
+.owner-red {
+  fill: #a72637;
+}
+
+.owner-blue {
+  fill: #2b6cb0;
+}
+
+.track-dot {
+  stroke: #ffffff;
+  stroke-width: 1.5;
+  fill: #111827;
+}
+
+.track-dot.stale {
+  fill: #6b7280;
+}
+
+.track-dot.inferred {
+  stroke-dasharray: 2 2;
+}
+
+.track-dot.fresh {
+  fill: #111827;
+}
+
+label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-bottom: 0.65rem;
+}
+
+input,
+select {
+  width: 100%;
+  border: 1px solid rgba(114, 84, 58, 0.3);
+  border-radius: 10px;
+  padding: 0.55rem 0.65rem;
+  background: #fffdf8;
+}
+
+.preview-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.preview-panel p {
+  margin-top: 0;
+}
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 0.75rem;
+}
+
+.summary-card {
+  padding: 0.9rem;
+  border-radius: 14px;
+  background: #f8efdc;
+  border: 1px solid rgba(114, 84, 58, 0.18);
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.summary-title,
+.summary-detail {
+  font-size: 0.78rem;
+  color: #6f6256;
+}
+
+.summary-value {
+  font-size: 1.3rem;
+}
+
+.subpanel {
+  border-top: 1px solid rgba(114, 84, 58, 0.14);
+  padding-top: 0.75rem;
+}
+
+.mini-table {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  margin-top: 0.75rem;
+}
+
+.inline-fields {
+  display: flex;
+  gap: 0.4rem;
+  flex: 1;
+}
+
+.checkbox-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.checkbox-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border: 1px solid rgba(114, 84, 58, 0.2);
+  background: #fff8eb;
+  padding: 0.35rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.84rem;
+}
+
+.checkbox-inline {
+  flex-direction: row;
+  align-items: center;
+}
+
+.restriction-block {
+  border: 1px solid rgba(114, 84, 58, 0.15);
+  border-radius: 12px;
+  padding: 0.75rem;
+  background: rgba(255, 252, 246, 0.75);
+}
+
+.issue-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  text-align: left;
+  gap: 0.2rem;
+  border-radius: 14px;
+  background: #f3ddd8;
+  color: #4b2b2f;
+}
+
+.compact-list {
+  margin: 0;
+  padding-left: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+@media (max-width: 1200px) {
+  .studio-grid,
+  .ops-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .preview-row {
+    grid-template-columns: 1fr;
+  }
+}

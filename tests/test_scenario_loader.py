@@ -6,10 +6,20 @@ from dcs_dungeon_master.core.exceptions import ConfigError
 from dcs_dungeon_master.scenario_state.registry import get_scenario_definition, list_scenarios
 
 
-def test_scenario_loader_success_for_persian_gulf_baseline() -> None:
-    scenario = get_scenario_definition("phase1_baseline_persian_gulf", "scenarios/index.toml")
+@pytest.mark.parametrize(
+    ("scenario_id", "theater"),
+    [
+        ("phase1_baseline_persian_gulf", "Persian Gulf"),
+        ("phase1_baseline_syria", "Syria"),
+        ("phase1_baseline_afghanistan", "Afghanistan"),
+        ("phase1_baseline_iraq", "Iraq"),
+        ("phase1_baseline_fulda_gap", "Fulda Gap"),
+    ],
+)
+def test_scenario_loader_success_for_authored_baselines(scenario_id: str, theater: str) -> None:
+    scenario = get_scenario_definition(scenario_id, "scenarios/index.toml")
 
-    assert scenario.theater == "Persian Gulf"
+    assert scenario.theater == theater
     assert scenario.version == "1"
     assert len(scenario.sectors) == 7
     assert len(scenario.control_points) == 6
@@ -17,9 +27,15 @@ def test_scenario_loader_success_for_persian_gulf_baseline() -> None:
     assert len(scenario.reserve_groups) == 6
 
 
-def test_scenario_registry_lists_persian_gulf() -> None:
+def test_scenario_registry_lists_authored_baselines() -> None:
     scenarios = list_scenarios("scenarios/index.toml")
-    assert scenarios[0].id == "phase1_baseline_persian_gulf"
+    scenario_ids = {scenario.id for scenario in scenarios}
+
+    assert "phase1_baseline_persian_gulf" in scenario_ids
+    assert "phase1_baseline_syria" in scenario_ids
+    assert "phase1_baseline_afghanistan" in scenario_ids
+    assert "phase1_baseline_iraq" in scenario_ids
+    assert "phase1_baseline_fulda_gap" in scenario_ids
 
 
 def test_scenario_loader_failure_for_missing_sections(tmp_path: Path) -> None:

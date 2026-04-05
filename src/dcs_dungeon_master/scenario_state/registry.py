@@ -118,7 +118,12 @@ def get_scenario_definition(
 
 def load_scenario_definition(path: str | Path) -> ScenarioDefinition:
     raw = _load_toml(Path(path))
-    context = f"Scenario definition '{path}'"
+    return load_scenario_definition_data(raw, context=f"Scenario definition '{path}'")
+
+
+def load_scenario_definition_data(raw: dict[str, Any], *, context: str = "Scenario definition") -> ScenarioDefinition:
+    if not isinstance(raw, dict):
+        raise ConfigError(f"{context}: root must be a table.")
 
     sectors_raw = raw.get("sectors", [])
     control_points_raw = raw.get("control_points", [])
@@ -197,6 +202,173 @@ def load_scenario_definition(path: str | Path) -> ScenarioDefinition:
         zones=zones,
         deployment_restrictions=restrictions,
     )
+
+
+def scenario_definition_to_dict(scenario: ScenarioDefinition) -> dict[str, Any]:
+    return {
+        "id": scenario.id,
+        "version": scenario.version,
+        "name": scenario.name,
+        "theater": scenario.theater,
+        "summary": scenario.summary,
+        "sectors": [
+            {
+                "id": sector.id,
+                "name": sector.name,
+                "role": sector.role,
+                "neighbor_ids": list(sector.neighbor_ids),
+                "tags": list(sector.tags),
+                "center_lat": sector.center_lat,
+                "center_lng": sector.center_lng,
+                "radius_nm": sector.radius_nm,
+            }
+            for sector in scenario.sectors
+        ],
+        "control_points": [
+            {
+                "id": control_point.id,
+                "name": control_point.name,
+                "sector_id": control_point.sector_id,
+                "kind": control_point.kind,
+                "owner": control_point.owner.value if control_point.owner is not None else None,
+                "strategic_value": control_point.strategic_value,
+                "lat": control_point.lat,
+                "lng": control_point.lng,
+            }
+            for control_point in scenario.control_points
+        ],
+        "coalitions": [
+            {
+                "coalition": coalition.coalition.value,
+                "budget_remaining": coalition.budget_remaining,
+                "objectives": list(coalition.objectives),
+                "reserve_ids": list(coalition.reserve_ids),
+                "standing_orders": [
+                    {
+                        "id": order.id,
+                        "text": order.text,
+                        "active": order.active,
+                    }
+                    for order in coalition.standing_orders
+                ],
+                "attrition_pool": coalition.attrition_pool,
+                "replacement_pool": coalition.replacement_pool,
+            }
+            for coalition in scenario.coalitions
+        ],
+        "active_groups": [
+            {
+                "id": group.id,
+                "coalition": group.coalition.value,
+                "group_type": group.group_type,
+                "posture": group.posture.value,
+                "sector_id": group.sector_id,
+                "mobile": group.mobile,
+                "status": group.status,
+                "control_point_id": group.control_point_id,
+                "attrition_count": group.attrition_count,
+                "replacement_pool": group.replacement_pool,
+            }
+            for group in scenario.active_groups
+        ],
+        "reserve_groups": [
+            {
+                "id": group.id,
+                "coalition": group.coalition.value,
+                "group_type": group.group_type,
+                "available": group.available,
+                "cost": group.cost,
+                "allowed_sector_ids": list(group.allowed_sector_ids),
+                "status": group.status,
+                "emergency": group.emergency,
+                "attrition_count": group.attrition_count,
+                "replacement_pool": group.replacement_pool,
+            }
+            for group in scenario.reserve_groups
+        ],
+        "zones": [
+            {
+                "id": zone.id,
+                "name": zone.name,
+                "sector_id": zone.sector_id,
+                "center_lat": zone.center_lat,
+                "center_lng": zone.center_lng,
+                "radius_nm": zone.radius_nm,
+                "tags": list(zone.tags),
+            }
+            for zone in scenario.zones
+        ],
+        "deployment_restrictions": [
+            {
+                "id": restriction.id,
+                "coalition": restriction.coalition.value if restriction.coalition is not None else None,
+                "restriction_type": restriction.restriction_type,
+                "description": restriction.description,
+                "sector_ids": list(restriction.sector_ids),
+                "control_point_ids": list(restriction.control_point_ids),
+                "adjacency_limited": restriction.adjacency_limited,
+            }
+            for restriction in scenario.deployment_restrictions
+        ],
+    }
+
+
+def serialize_scenario_definition_toml(scenario: ScenarioDefinition) -> str:
+    data = scenario_definition_to_dict(scenario)
+    lines: list[str] = []
+    for scalar_key in ("id", "version", "name", "theater", "summary"):
+        lines.append(f'{scalar_key} = {_toml_value(data[scalar_key])}')
+    lines.append("")
+    _append_table_array(lines, "sectors", data["sectors"])
+    _append_table_array(lines, "control_points", data["control_points"])
+    _append_table_array(lines, "coalitions", data["coalitions"])
+    _append_table_array(lines, "active_groups", data["active_groups"])
+    _append_table_array(lines, "reserve_groups", data["reserve_groups"])
+    if data["zones"]:
+        _append_table_array(lines, "zones", data["zones"])
+    if data["deployment_restrictions"]:
+        _append_table_array(lines, "deployment_restrictions", data["deployment_restrictions"])
+    return "\n".join(lines).strip() + "\n"
+
+
+def serialize_registry(entries: tuple[ScenarioRegistryEntry, ...]) -> str:
+    lines: list[str] = []
+    for index, entry in enumerate(entries):
+        if index:
+            lines.append("")
+        lines.append("[[scenarios]]")
+        lines.append(f'id = {_toml_value(entry.id)}')
+        lines.append(f'name = {_toml_value(entry.name)}')
+        lines.append(f'theater = {_toml_value(entry.theater)}')
+        lines.append(f'path = {_toml_value(entry.path.name)}')
+        lines.append(f'summary = {_toml_value(entry.summary)}')
+    return "\n".join(lines).strip() + "\n"
+
+
+def _append_table_array(lines: list[str], table_name: str, rows: list[dict[str, Any]]) -> None:
+    for row in rows:
+        lines.append(f"[[{table_name}]]")
+        for key, value in row.items():
+            if value is None:
+                continue
+            lines.append(f"{key} = {_toml_value(value)}")
+        lines.append("")
+
+
+def _toml_value(value: Any) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, str):
+        escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+        return f'"{escaped}"'
+    if isinstance(value, int | float):
+        return str(value)
+    if isinstance(value, dict):
+        parts = [f"{key} = {_toml_value(item)}" for key, item in value.items() if item is not None]
+        return "{ " + ", ".join(parts) + " }"
+    if isinstance(value, list | tuple):
+        return "[" + ", ".join(_toml_value(item) for item in value) + "]"
+    raise ConfigError(f"Unsupported TOML serialization value: {value!r}")
 
 
 def _parse_sector(data: dict[str, Any], context: str) -> SectorState:

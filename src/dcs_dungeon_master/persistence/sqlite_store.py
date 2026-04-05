@@ -77,6 +77,7 @@ from dcs_dungeon_master.core.models import (
     RunSummary,
     RunTimelineEntry,
     ScenarioDefinition,
+    ScenarioDraftView,
     ReserveGroupState,
     ScenarioZone,
     ScenarioStateView,
@@ -233,6 +234,17 @@ class SQLiteStateStore:
                     control_point_ids_json TEXT NOT NULL,
                     adjacency_limited INTEGER NOT NULL,
                     PRIMARY KEY (run_id, restriction_id)
+                );
+
+                CREATE TABLE IF NOT EXISTS scenario_drafts (
+                    draft_id TEXT PRIMARY KEY,
+                    source_scenario_id TEXT NOT NULL,
+                    scenario_id TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    theater TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    pydcs_mapping_json TEXT NOT NULL
                 );
 
                 CREATE TABLE IF NOT EXISTS world_state_snapshots (
@@ -903,6 +915,19 @@ class SQLiteStateStore:
             raise PersistenceError(f"Unknown run id: {resolved_run_id}")
         return self._row_to_run_control_state(row)
 
+    def list_run_control_states(self) -> tuple[RunControlState, ...]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT run_id, scenario_id, scenario_version, scenario_name, theater, mode, status, created_at,
+                       config_digest, config_snapshot_json, red_backend_name, blue_backend_name, started_at,
+                       paused_at, resumed_at, stopped_at, failed_at, terminal_reason, evaluation_metadata_json
+                FROM runs
+                ORDER BY created_at DESC, run_id DESC
+                """
+            ).fetchall()
+        return tuple(self._row_to_run_control_state(row) for row in rows)
+
     def update_run_status(
         self,
         run_id: str,
@@ -1096,6 +1121,66 @@ class SQLiteStateStore:
             "execution_result_count": execution_result_count,
             "db_path": str(self.db_path),
         }
+
+    def save_scenario_draft(self, draft: ScenarioDraftView) -> str:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO scenario_drafts (
+                    draft_id, source_scenario_id, scenario_id, name, theater, updated_at, payload_json, pydcs_mapping_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(draft_id) DO UPDATE SET
+                    source_scenario_id = excluded.source_scenario_id,
+                    scenario_id = excluded.scenario_id,
+                    name = excluded.name,
+                    theater = excluded.theater,
+                    updated_at = excluded.updated_at,
+                    payload_json = excluded.payload_json,
+                    pydcs_mapping_json = excluded.pydcs_mapping_json
+                """,
+                (
+                    draft.draft_id,
+                    draft.source_scenario_id,
+                    draft.scenario_id,
+                    draft.display_name,
+                    draft.theater,
+                    draft.updated_at.isoformat(),
+                    _json(draft.scenario),
+                    _json(draft.pydcs_mapping),
+                ),
+            )
+        return draft.draft_id
+
+    def get_scenario_draft(self, draft_id: str) -> ScenarioDraftView:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT draft_id, source_scenario_id, scenario_id, name, theater, updated_at, payload_json, pydcs_mapping_json
+                FROM scenario_drafts
+                WHERE draft_id = ?
+                """,
+                (draft_id,),
+            ).fetchone()
+        if row is None:
+            raise PersistenceError(f"Unknown scenario draft id: {draft_id}")
+        return self._row_to_scenario_draft(row)
+
+    def list_scenario_drafts(self) -> tuple[ScenarioDraftView, ...]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT draft_id, source_scenario_id, scenario_id, name, theater, updated_at, payload_json, pydcs_mapping_json
+                FROM scenario_drafts
+                ORDER BY updated_at DESC, draft_id DESC
+                """
+            ).fetchall()
+        return tuple(self._row_to_scenario_draft(row) for row in rows)
+
+    def delete_scenario_draft(self, draft_id: str) -> None:
+        with self._connect() as connection:
+            cursor = connection.execute("DELETE FROM scenario_drafts WHERE draft_id = ?", (draft_id,))
+        if cursor.rowcount == 0:
+            raise PersistenceError(f"Unknown scenario draft id: {draft_id}")
 
     def get_coalition_states(self, run_id: str) -> tuple[CoalitionState, ...]:
         with self._connect() as connection:
@@ -3499,6 +3584,23 @@ class SQLiteStateStore:
             failed_at=_parse_dt(row["failed_at"]),
             terminal_reason=row["terminal_reason"],
             evaluation_metadata=json.loads(row["evaluation_metadata_json"]) if row["evaluation_metadata_json"] else None,
+        )
+
+    def _row_to_scenario_draft(self, row: sqlite3.Row) -> ScenarioDraftView:
+        scenario_payload = json.loads(row["payload_json"])
+        return ScenarioDraftView(
+            draft_id=row["draft_id"],
+            source_scenario_id=row["source_scenario_id"],
+            source_scenario_name=None,
+            scenario_id=row["scenario_id"],
+            name=str(scenario_payload.get("name", row["scenario_id"])),
+            display_name=row["name"],
+            theater=row["theater"],
+            updated_at=datetime.fromisoformat(row["updated_at"]),
+            scenario=scenario_payload,
+            dirty=False,
+            map_reference=None,
+            pydcs_mapping=json.loads(row["pydcs_mapping_json"]),
         )
 
     def _row_to_evaluation_run_summary(self, row: sqlite3.Row) -> EvaluationRunSummary:

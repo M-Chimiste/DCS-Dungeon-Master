@@ -26,6 +26,7 @@ from dcs_dungeon_master.operator_control import OperatorControlService
 from dcs_dungeon_master.persistence import SQLiteStateStore
 from dcs_dungeon_master.scenario_state.registry import get_scenario_definition
 from dcs_dungeon_master.sensor_fusion import SensorFusionService
+from dcs_dungeon_master.web_ui import WebUiService, serve_web_ui
 from dcs_dungeon_master.world_state import KnowledgeDebugView, WorldStateRepository, WorldStateUpdater
 
 
@@ -366,6 +367,15 @@ def build_parser() -> argparse.ArgumentParser:
         "validate-grpc-contracts",
         help="Generate vendored gRPC stubs into a temporary location to validate the proto contracts.",
     )
+
+    serve_web = subparsers.add_parser(
+        "serve-web-ui",
+        help="Run the Milestone 10 JSON API server for Campaign Studio and Live Ops.",
+    )
+    add_config_argument(serve_web)
+    serve_web.add_argument("--host", type=str, default="127.0.0.1")
+    serve_web.add_argument("--port", type=int, default=8080)
+    serve_web.add_argument("--static-dir", type=Path, default=Path("frontend/dist"))
 
     return parser
 
@@ -892,6 +902,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         with tempfile.TemporaryDirectory(prefix="dcs-grpc-contracts-") as temp_dir:
             paths = [str(path) for path in generate_vendored_stubs(temp_dir)]
             print(json.dumps({"generated_files": paths}, indent=2, sort_keys=True))
+        return 0
+
+    if args.command == "serve-web-ui":
+        service = WebUiService.from_config_path(args.config)
+        serve_web_ui(service, host=args.host, port=args.port, static_dir=args.static_dir)
         return 0
 
     parser.error(f"Unsupported command: {args.command}")
