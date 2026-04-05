@@ -12,9 +12,26 @@ Read this before making code changes.
 
 ## Current Repo State
 
-This repo is still in pre-implementation planning.
+Milestones 0 through 9 are implemented.
 
-At the moment, the main source of truth is the documentation set in `project-docs/`. Coding work should follow those docs rather than inventing a different Phase 1 shape during implementation.
+The repo now includes:
+
+- Python backend skeleton and CLI
+- Authored Persian Gulf baseline scenario
+- SQLite current-state and event persistence
+- Olympus and DCS-gRPC integration layers
+- Internal world-state and fog-of-war fusion
+- Canonical observation building and replay artifacts
+- Phase 1 action validation
+- OpenAI-compatible model adapter support
+- Dry dual-commander decision loop
+- Live execution and command loop
+- CLI-first operator control, replay bundles, and run inspection
+- Evaluation harness, fairness review, and baseline matrix tooling
+
+There is no higher numbered milestone defined yet in `project-docs/MILESTONE-PLAN.md`.
+
+The main source of truth is still the documentation set in `project-docs/`, but agents should assume the codebase is active and should keep implementation and docs aligned.
 
 ## Source Of Truth Docs
 
@@ -68,20 +85,11 @@ Phase 1 is not:
 
 Follow the milestone sequence in `project-docs/MILESTONE-PLAN.md`.
 
-The intended order is:
+Current milestone status:
 
-1. Project skeleton and domain contracts
-2. Scenario state and persistence
-3. Simulation integration
-4. Sensor fusion and fog-of-war
-5. Observation pipeline
-6. Action validation
-7. Model adapter and dry loop
-8. Live execution loop
-9. Operator/replay tooling
-10. Evaluation harness and tuning
+- Milestones 0-9: implemented
 
-Do not jump straight to model integration or live simulator execution before the domain, observation, and validation layers exist.
+Do not jump straight to live simulator execution before the existing domain, observation, validation, and dry-loop layers are respected.
 
 ## Working Rules For Agents
 
@@ -94,7 +102,7 @@ Do not jump straight to model integration or live simulator execution before the
 
 ## Expected Code Areas
 
-When implementation starts, the codebase should likely separate concerns roughly into:
+The codebase currently separates concerns roughly into:
 
 - `integration`
 - `world_state`
@@ -141,11 +149,12 @@ Prefer:
 - inspectability over cleverness
 - milestone alignment over speculative expansion
 
-## First Coding Target
+## Current Coding Target
 
-If no more specific task is given, start with Milestone 0 from `project-docs/MILESTONE-PLAN.md`:
+If no more specific task is given, the default focus should be post-Milestone-9 hardening and tuning work around the implemented system:
 
-- project skeleton
-- core domain objects
-- baseline configuration layout
-- dry-run friendly app startup
+- keep contracts aligned with the docs
+- harden integration resilience and auditability
+- preserve coalition-safe observation and validation behavior
+- avoid bypassing the dry-loop and validation boundaries
+- improve baseline evaluation quality and tuning workflows

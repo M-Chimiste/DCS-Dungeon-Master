@@ -17,6 +17,7 @@ from dcs_dungeon_master.core.models import (
     KnownControlPointView,
     KnownSectorView,
     ObservationArtifact,
+    ObservationAttachment,
     ObservationMeta,
     ReserveAvailabilityView,
     ResourceStateView,
@@ -52,7 +53,12 @@ class ObservationBuilder:
     ) -> ObservationArtifact:
         world = self.store.get_world_state_snapshot(run_id)
         generated_at = now or world.last_ingest_at or datetime.now(UTC)
-        knowledge_result = fusion_result or self.sensor_fusion.preview(run_id, now=generated_at)
+        if fusion_result is None:
+            knowledge_result = self.sensor_fusion.preview(run_id, now=generated_at)
+            fusion_update_id = self.store.save_fusion_update(run_id, knowledge_result) if persist else None
+        else:
+            knowledge_result = fusion_result
+            fusion_update_id = self.store.get_latest_fusion_update_id(run_id) if persist else None
         knowledge = next(item for item in knowledge_result.knowledge_states if item.coalition is coalition)
         coalition_state = next(item for item in self.store.get_coalition_states(run_id) if item.coalition is coalition)
         active_groups = tuple(item for item in self.store.get_active_groups(run_id) if item.coalition is coalition)
@@ -78,6 +84,7 @@ class ObservationBuilder:
             recent_changes=(),
             standing_orders=tuple(order.text for order in coalition_state.standing_orders if order.active),
             requests_for_decision=(),
+            attachments=self._build_attachment_placeholders(coalition),
         )
         observation = self._with_recent_changes_and_requests(observation, previous_artifact)
         narrative = self.render_narrative(observation)
@@ -88,6 +95,7 @@ class ObservationBuilder:
             decision_cycle=decision_cycle,
             generated_at=generated_at,
             previous_observation_id=previous_artifact.id if previous_artifact else None,
+            fusion_update_id=fusion_update_id,
             observation=observation,
             narrative=narrative,
         )
@@ -99,6 +107,7 @@ class ObservationBuilder:
                 decision_cycle=artifact.decision_cycle,
                 generated_at=artifact.generated_at,
                 previous_observation_id=artifact.previous_observation_id,
+                fusion_update_id=artifact.fusion_update_id,
                 observation=artifact.observation,
                 narrative=artifact.narrative,
             )
@@ -116,6 +125,8 @@ class ObservationBuilder:
         world = self.store.get_world_state_snapshot(run_id)
         generated_at = now or world.last_ingest_at or datetime.now(UTC)
         fusion_result = self.sensor_fusion.preview(run_id, now=generated_at)
+        if persist:
+            self.store.save_fusion_update(run_id, fusion_result)
         return (
             self.build_observation(
                 run_id,
@@ -148,6 +159,7 @@ class ObservationBuilder:
             "friendly_force_count": len(observation.friendly_forces),
             "recent_change_count": len(observation.recent_changes),
             "request_count": len(observation.requests_for_decision),
+            "attachment_count": len(observation.attachments),
         }
 
     def render_latest(self, run_id: str, coalition: Coalition, fmt: str) -> dict[str, Any] | str:
@@ -409,6 +421,25 @@ class ObservationBuilder:
             recent_changes=recent_changes,
             standing_orders=observation.standing_orders,
             requests_for_decision=requests,
+            attachments=observation.attachments,
+        )
+
+    def _build_attachment_placeholders(self, coalition: Coalition) -> tuple[ObservationAttachment, ...]:
+        return (
+            ObservationAttachment(
+                attachment_id=f"{coalition.value}_map_attachment_placeholder",
+                media_type="image/png",
+                role="map_overlay_placeholder",
+                description=(
+                    "Reserved placeholder for future coalition-filtered map imagery. "
+                    "No visual payload is attached in the current milestone."
+                ),
+                metadata={
+                    "multimodal_enabled": False,
+                    "coalition": coalition.value,
+                    "phase": "stub_only",
+                },
+            ),
         )
 
     def _recent_changes(

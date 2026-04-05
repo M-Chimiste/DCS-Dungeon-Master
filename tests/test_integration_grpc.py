@@ -97,6 +97,7 @@ def test_dcs_grpc_health_check_supports_remote_endpoint() -> None:
     health = client.check_health()
 
     assert health.healthy is True
+    assert health.status == "healthy"
     assert health.endpoint == "192.168.10.50:50051"
     assert captured[0].server_host_override == "dcs.internal"
 
@@ -119,6 +120,63 @@ def test_dcs_grpc_wrapper_normalizes_metadata_and_streams() -> None:
     assert unit_events[0].payload["unit_id"] == "blue_armor_1"
     assert mission_events[0].event_type == "contact"
     assert mission_events[0].payload["description"] == "Ping"
+
+
+def test_dcs_grpc_stream_retries_and_recovers() -> None:
+    calls = {"count": 0}
+
+    class RetryStub(FakeMissionServiceStub):
+        def StreamUnits(self, request, timeout: float):
+            calls["count"] += 1
+            if calls["count"] == 1:
+                raise RuntimeError("transient stream drop")
+            return super().StreamUnits(request, timeout)
+
+    client = DcsGrpcClient(
+        GrpcConfig(host="127.0.0.1", port=50051, timeout_sec=4.0, retry_attempts=1),
+        channel_factory=lambda config: FakeChannel(),
+        channel_ready=lambda channel, timeout: None,
+        contract_loader=_fake_contracts,
+        stub_factory=lambda channel, contracts: RetryStub(),
+        sleep_fn=lambda seconds: None,
+    )
+
+    events = list(client.iter_unit_events(poll_rate=2.0, coalition="blue"))
+    status = client.get_stream_status("unit_events")
+
+    assert len(events) == 1
+    assert status is not None
+    assert status.status == "healthy"
+    assert status.attempt_count == 2
+
+
+def test_dcs_grpc_stream_retry_exhaustion_is_machine_readable() -> None:
+    class FailingStub(FakeMissionServiceStub):
+        def StreamEvents(self, request, timeout: float):
+            raise RuntimeError("hard failure")
+
+    client = DcsGrpcClient(
+        GrpcConfig(host="127.0.0.1", port=50051, timeout_sec=4.0, retry_attempts=1),
+        channel_factory=lambda config: FakeChannel(),
+        channel_ready=lambda channel, timeout: None,
+        contract_loader=_fake_contracts,
+        stub_factory=lambda channel, contracts: FailingStub(),
+        sleep_fn=lambda seconds: None,
+    )
+
+    try:
+        list(client.iter_mission_events())
+    except Exception as exc:  # noqa: BLE001
+        message = str(exc)
+    else:  # pragma: no cover
+        raise AssertionError("Expected the gRPC mission stream to fail.")
+
+    status = client.get_stream_status("mission_events")
+
+    assert "status=failed" in message
+    assert "attempts=2" in message
+    assert status is not None
+    assert status.status == "failed"
 
 
 def test_generate_vendored_stubs_creates_python_modules(tmp_path: Path) -> None:

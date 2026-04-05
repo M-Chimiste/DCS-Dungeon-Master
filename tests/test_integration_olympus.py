@@ -55,6 +55,7 @@ def test_olympus_health_check_and_snapshots_normalize_payloads() -> None:
     airfields = client.get_airfields_snapshot()
 
     assert health.healthy is True
+    assert health.status == "healthy"
     assert health.endpoint == "http://olympus.test/olympus/mission"
     assert mission.theater == "Persian Gulf"
     assert mission.weather_summary == "good, light"
@@ -95,4 +96,27 @@ def test_olympus_write_request_builds_auth_headers(monkeypatch) -> None:
     assert (captured_headers.get("x-authorized") or captured_headers.get("X-Authorized")) == "controller"
     assert (captured_headers.get("x-olympus-password") or captured_headers.get("X-Olympus-Password")) == "secret"
 
+    client.close()
+
+
+def test_olympus_health_retry_classification_is_deterministic() -> None:
+    calls = {"count": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["count"] += 1
+        if calls["count"] == 1:
+            return httpx.Response(503, json={"detail": "warming up"})
+        return httpx.Response(200, json={"theater": "Persian Gulf"})
+
+    client = OlympusClient(
+        OlympusConfig(base_url="http://olympus.test", timeout_sec=2.0, retry_attempts=2),
+        transport=httpx.MockTransport(handler),
+    )
+
+    health = client.check_health()
+
+    assert health.healthy is True
+    assert health.status == "healthy"
+    assert health.attempt_count == 2
+    assert "after retry" in health.detail
     client.close()

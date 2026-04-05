@@ -8,6 +8,21 @@ DCS Dungeon Master
 
 Draft 0.1
 
+## Milestone Status
+
+- `Milestone 0`: `implemented`
+- `Milestone 1`: `implemented`
+- `Milestone 2`: `implemented_with_gaps`
+- `Milestone 3`: `implemented`
+- `Milestone 4`: `implemented_with_gaps`
+- `Milestone 5`: `implemented_with_gaps`
+- `Milestone 6`: `implemented_with_gaps`
+- `Milestone 7`: `implemented`
+- `Milestone 8`: `implemented`
+- `Milestone 9`: `implemented`
+
+The `implemented_with_gaps` milestones are working in the repo, but still have targeted hardening and alignment tasks tracked in the current gap-mitigation pass.
+
 ## Purpose
 
 This document converts the planning documents into a milestone-based implementation plan for Phase 1. It defines the recommended build order, key workstreams, milestone goals, concrete tasks, expected deliverables, dependencies, and exit criteria.

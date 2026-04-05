@@ -65,6 +65,28 @@ class ValidationStatus(StrEnum):
     PARTIALLY_ACCEPTED = "partially_accepted"
 
 
+class ExecutionStatus(StrEnum):
+    SUCCEEDED = "succeeded"
+    PARTIALLY_SUCCEEDED = "partially_succeeded"
+    FAILED = "failed"
+    NO_CHANGE = "no_change"
+
+
+class ExecutionLifecycleState(StrEnum):
+    PENDING = "pending"
+    IN_FLIGHT = "in_flight"
+    COMPLETED = "completed"
+    ABORTED = "aborted"
+
+
+class RunLifecycleStatus(StrEnum):
+    CREATED = "created"
+    RUNNING = "running"
+    PAUSED = "paused"
+    STOPPED = "stopped"
+    FAILED = "failed"
+
+
 class RejectionCode(StrEnum):
     UNKNOWN_ACTION_TYPE = "unknown_action_type"
     MISSING_REQUIRED_FIELD = "missing_required_field"
@@ -91,3 +113,36 @@ class ModelHostingMode(StrEnum):
 class LoggingFormat(StrEnum):
     TEXT = "text"
     JSON = "json"
+
+
+class EvaluationReviewPolicy(StrEnum):
+    SUSPICIOUS_ONLY = "suspicious_only"
+
+
+class FairnessMode(StrEnum):
+    HYBRID = "hybrid"
+
+
+class FairnessMachineStatus(StrEnum):
+    CLEAR = "clear"
+    SUSPICIOUS = "suspicious"
+
+
+class FairnessReviewStatus(StrEnum):
+    NOT_REQUIRED = "not_required"
+    PENDING_REVIEW = "pending_review"
+    CLEARED = "cleared"
+    CONFIRMED_LEAKAGE = "confirmed_leakage"
+
+
+class EvaluationRating(StrEnum):
+    EXCELLENT = "excellent"
+    ACCEPTABLE = "acceptable"
+    BORDERLINE = "borderline"
+    FAILED = "failed"
+
+
+class MatrixCaseStatus(StrEnum):
+    COMPLETED = "completed"
+    FAILED = "failed"
+    SKIPPED_UNSUPPORTED = "skipped_unsupported"

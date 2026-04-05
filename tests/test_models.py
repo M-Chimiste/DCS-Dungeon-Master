@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from dcs_dungeon_master.core.enums import ActionType, Coalition, GroupPosture, ValidationStatus
+from dcs_dungeon_master.core.enums import ActionType, Coalition, ExecutionStatus, GroupPosture
 from dcs_dungeon_master.core.models import (
     ActionRequest,
     CoalitionState,
@@ -81,7 +81,8 @@ def test_domain_models_construct_cleanly() -> None:
     )
     result = ExecutionResult(
         action_id=action.id,
-        status=ValidationStatus.ACCEPTED,
+        action_type=action.action_type,
+        status=ExecutionStatus.NO_CHANGE,
         execution_summary="No change.",
     )
 
@@ -89,5 +90,5 @@ def test_domain_models_construct_cleanly() -> None:
     assert scenario.sector_ids == ("red_rear",)
     assert observation.coalition is Coalition.RED
     assert action.action_type is ActionType.HOLD_ACTION
-    assert result.status is ValidationStatus.ACCEPTED
+    assert result.status is ExecutionStatus.NO_CHANGE
     assert GroupPosture.DEFENSIVE.value == "defensive"
