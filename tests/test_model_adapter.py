@@ -17,9 +17,31 @@ from dcs_dungeon_master.scenario_state.registry import get_scenario_definition
 from dcs_dungeon_master.sensor_fusion import SensorFusionService
 
 
-def _write_temp_config(tmp_path: Path) -> Path:
+def _write_temp_config(tmp_path: Path, *, include_fallback: bool = False) -> Path:
     config_path = tmp_path / "config.toml"
     db_path = tmp_path / "state.sqlite3"
+    fallback_models = (
+        """
+
+[[models]]
+name = "fallback_backend"
+hosting_mode = "hosted"
+endpoint = "https://api.example.test/v1"
+model = "gpt-5"
+enabled = true
+max_retries = 1
+""".strip()
+        if include_fallback
+        else ""
+    )
+    fallback_routing = (
+        """
+red_fallback_backend = "fallback_backend"
+blue_fallback_backend = "fallback_backend"
+""".strip()
+        if include_fallback
+        else ""
+    )
     config_path.write_text(
         f"""
 [runtime]
@@ -59,9 +81,12 @@ model = "gemma-4-26b-a4b-it"
 enabled = true
 max_retries = 1
 
+{fallback_models}
+
 [model_routing]
 red_backend = "red_backend"
 blue_backend = "blue_backend"
+{fallback_routing}
 
 [scenario]
 id = "phase1_baseline_persian_gulf"
@@ -80,12 +105,12 @@ summary_output = "text"
     return config_path
 
 
-def _build_runner(tmp_path: Path, transports: dict[str, httpx.BaseTransport]):
-    config = load_config(_write_temp_config(tmp_path))
+def _build_runner(tmp_path: Path, transports: dict[str, httpx.BaseTransport], *, include_fallback: bool = False):
+    config = load_config(_write_temp_config(tmp_path, include_fallback=include_fallback))
     scenario = get_scenario_definition(config.scenario.id, config.scenario.registry_path)
     store = SQLiteStateStore(config.persistence.db_path)
     run_id = store.create_run_from_scenario(scenario)
-    observation_builder = ObservationBuilder(store, scenario, SensorFusionService(store, scenario, config.fog_of_war))
+    observation_builder = ObservationBuilder(store, scenario, SensorFusionService(store, scenario, config.fog_of_war), config.multimodal)
     validator = ActionValidator(store, scenario)
     registry = build_model_registry(config, transports=transports)
     runner = DryDecisionLoopRunner(store, observation_builder, validator, registry)
@@ -280,6 +305,41 @@ def test_dry_decision_cycle_continues_other_coalition_when_one_parse_fails(tmp_p
     assert invocations[Coalition.BLUE].validation_batch_id is None
     assert store.get_latest_action_validation_batch(run_id, Coalition.RED).results[0].action_id == "red_hold"
     assert cycle.classification == "one_succeeded_one_failed"
+
+
+def test_model_failover_uses_secondary_backend_after_primary_parse_failure(tmp_path: Path) -> None:
+    def red_handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/chat/completions"):
+            return httpx.Response(200, json={"choices": [{"message": {"content": "not-json"}}]})
+        return httpx.Response(200, json={"data": [{"id": "gemma"}]})
+
+    def blue_handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/chat/completions"):
+            return httpx.Response(
+                200,
+                json={"choices": [{"message": {"content": '{"actions":[{"action_id":"blue_hold","action_type":"hold_action","reason":"Maintain","scope":"global"}]}'}}]},
+            )
+        return httpx.Response(200, json={"data": [{"id": "gemma"}]})
+
+    store, run_id, runner = _build_runner(
+        tmp_path,
+        {
+            "red_backend": httpx.MockTransport(red_handler),
+            "blue_backend": httpx.MockTransport(blue_handler),
+            "fallback_backend": httpx.MockTransport(blue_handler),
+        },
+        include_fallback=True,
+    )
+
+    result = runner.run_decision_cycle(run_id, 3)
+    invocations = {item.coalition: item for item in store.list_model_invocations(run_id)}
+
+    assert result.classification == "both_succeeded"
+    assert invocations[Coalition.RED].backend_name == "fallback_backend"
+    assert invocations[Coalition.RED].failover_used is True
+    assert len(invocations[Coalition.RED].attempt_trace) == 2
+    assert invocations[Coalition.RED].attempt_trace[0].backend_name == "red_backend"
+    assert invocations[Coalition.RED].attempt_trace[1].backend_name == "fallback_backend"
 
 
 def test_dry_decision_loop_stops_cleanly_when_run_is_paused(tmp_path: Path) -> None:

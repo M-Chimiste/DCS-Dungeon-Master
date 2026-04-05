@@ -49,10 +49,20 @@ hosting_mode = "local"
 endpoint = "http://127.0.0.1:1234/v1"
 model = "gemma-4-26b-a4b-it"
 enabled = true
+multimodal = true
+
+[[models]]
+name = "hosted_default"
+hosting_mode = "hosted"
+endpoint = "https://api.example.test/v1"
+model = "gpt-5"
+enabled = true
 
 [model_routing]
 red_backend = "local_default"
 blue_backend = "local_default"
+red_fallback_backend = "hosted_default"
+blue_fallback_backend = "hosted_default"
 
 [scenario]
 id = "phase1_baseline_persian_gulf"
@@ -65,6 +75,10 @@ enable_wal = true
 [dry_run]
 enabled = true
 summary_output = "text"
+
+[multimodal]
+enabled = true
+output_dir = ".cache/test-attachments"
 
 [evaluation]
 profile_name = "phase1_baseline"
@@ -201,12 +215,18 @@ def test_evaluation_cli_and_matrix_commands(tmp_path: Path, capsys, monkeypatch)
         ["eval-compare", "--config", str(config_path), "--left-run-id", run_id, "--right-run-id", run_id]
     )
     eval_compare_payload = json.loads(capsys.readouterr().out)
+    replay_export_exit = main(
+        ["replay-export", "--config", str(config_path), "--run-id", run_id, "--output", str(tmp_path / "eval-bundle")]
+    )
+    replay_export_payload = json.loads(capsys.readouterr().out)
     review_queue_exit = main(["eval-review-queue", "--config", str(config_path)])
     review_queue_payload = json.loads(capsys.readouterr().out)
     matrix_exit = main(["eval-run-matrix", "--config", str(config_path), "--profile", "phase1_baseline"])
     matrix_payload = json.loads(capsys.readouterr().out)
     matrix_report_exit = main(["eval-matrix-report", "--config", str(config_path), "--profile", "phase1_baseline"])
     matrix_report_payload = json.loads(capsys.readouterr().out)
+    closeout_exit = main(["eval-closeout-status", "--config", str(config_path), "--run-id", run_id, "--profile", "phase1_baseline"])
+    closeout_payload = json.loads(capsys.readouterr().out)
 
     assert init_exit_code == 0
     assert eval_run_exit == 0
@@ -215,12 +235,16 @@ def test_evaluation_cli_and_matrix_commands(tmp_path: Path, capsys, monkeypatch)
     assert eval_summary_payload["run_id"] == run_id
     assert eval_compare_exit == 0
     assert eval_compare_payload["left_run_id"] == run_id
+    assert replay_export_exit == 0
+    assert replay_export_payload["run_id"] == run_id
     assert review_queue_exit == 0
     assert "pending_findings" in review_queue_payload
     assert matrix_exit == 0
     assert matrix_payload["profile_name"] == "phase1_baseline"
     assert matrix_report_exit == 0
     assert matrix_report_payload["profile_name"] == "phase1_baseline"
+    assert closeout_exit == 0
+    assert closeout_payload["replay_export_present"] is True
 
 
 def test_check_integration_cli_smoke(tmp_path: Path, capsys, monkeypatch) -> None:
@@ -256,6 +280,44 @@ def test_check_integration_cli_smoke(tmp_path: Path, capsys, monkeypatch) -> Non
     assert exit_code == 0
     assert payload["olympus"]["healthy"] is True
     assert payload["dcs_grpc"]["detail"] == "ok"
+
+
+def test_ingest_step_cli_smoke(tmp_path: Path, capsys, monkeypatch) -> None:
+    class FakeIntegrations:
+        olympus = type(
+            "FakeOlympus",
+            (),
+            {
+                "get_mission_snapshot": staticmethod(lambda: type("Mission", (), {"theater": "Persian Gulf", "mission_name": "Test", "mission_time": "12:00:00Z", "weather_summary": "clear"})()),
+                "get_units_snapshot": staticmethod(lambda: ()),
+                "get_airfields_snapshot": staticmethod(lambda: ()),
+                "close": staticmethod(lambda: None),
+            },
+        )()
+        dcs_grpc = type(
+            "FakeGrpc",
+            (),
+            {
+                "get_mission_metadata": staticmethod(lambda: type("GrpcMeta", (), {"theater": "Persian Gulf", "mission_name": "Test", "mission_time": "12:00:00Z"})()),
+                "iter_unit_events": staticmethod(lambda **kwargs: iter(())),
+                "iter_mission_events": staticmethod(lambda: iter(())),
+            },
+        )()
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr("dcs_dungeon_master.__main__.build_integration_services", lambda config: FakeIntegrations())
+
+    config_path = _write_temp_config(tmp_path)
+    init_exit = main(["init-state", "--config", str(config_path)])
+    run_id = json.loads(capsys.readouterr().out)["run_id"]
+    ingest_exit = main(["ingest-step", "--config", str(config_path), "--run-id", run_id])
+    ingest_payload = json.loads(capsys.readouterr().out)
+
+    assert init_exit == 0
+    assert ingest_exit == 0
+    assert ingest_payload["normalized_batch"]["mission_snapshot_present"] is True
 
 
 def test_world_state_and_fusion_cli_smoke(tmp_path: Path, capsys) -> None:
@@ -544,6 +606,9 @@ def test_model_backend_and_decision_cycle_cli_smoke(tmp_path: Path, capsys, monk
                     {
                         "endpoint": "http://127.0.0.1:4512",
                         "check_health": staticmethod(lambda: type("Health", (), {"service": "olympus", "endpoint": "http://127.0.0.1:4512", "healthy": True, "detail": "ok", "status": "healthy", "attempt_count": 1})()),
+                        "get_mission_snapshot": staticmethod(lambda: type("Mission", (), {"theater": "Persian Gulf", "mission_name": "Test", "mission_time": "12:00:00Z", "weather_summary": "clear"})()),
+                        "get_units_snapshot": staticmethod(lambda: ()),
+                        "get_airfields_snapshot": staticmethod(lambda: ()),
                         "build_write_request": staticmethod(lambda path, payload, method="POST": type("Req", (), {"method": method, "path": path, "payload": payload, "headers": {}})()),
                         "send_write_request": staticmethod(lambda request: {"accepted": True}),
                         "close": staticmethod(lambda: None),
@@ -555,6 +620,9 @@ def test_model_backend_and_decision_cycle_cli_smoke(tmp_path: Path, capsys, monk
                     {
                         "endpoint": "127.0.0.1:50051",
                         "check_health": staticmethod(lambda: type("Health", (), {"service": "dcs_grpc", "endpoint": "127.0.0.1:50051", "healthy": True, "detail": "ok", "status": "healthy", "attempt_count": 1})()),
+                        "get_mission_metadata": staticmethod(lambda: type("GrpcMeta", (), {"theater": "Persian Gulf", "mission_name": "Test", "mission_time": "12:00:00Z"})()),
+                        "iter_unit_events": staticmethod(lambda **kwargs: iter(())),
+                        "iter_mission_events": staticmethod(lambda: iter(())),
                     },
                 )(),
                 "check_health": staticmethod(
@@ -654,6 +722,7 @@ def test_model_backend_and_decision_cycle_cli_smoke(tmp_path: Path, capsys, monk
     assert health_exit == 0
     assert any(item["healthy"] is True for item in health_payload["health"])
     assert health_payload["capabilities"][0]["supports_structured_output"] is True
+    assert health_payload["routing"]["red"]["fallback"] == "hosted_default"
     assert cycle_exit == 0
     assert cycle_payload["decision_cycle"] == 1
     assert cycle_payload["classification"] == "both_succeeded"
@@ -673,3 +742,4 @@ def test_model_backend_and_decision_cycle_cli_smoke(tmp_path: Path, capsys, monk
     assert any(check["milestone"] == "Milestone 6" and check["passed"] is True for check in audit_payload["checks"])
     assert any(check["milestone"] == "Milestone 7" and check["passed"] is True for check in audit_payload["checks"])
     assert any(check["milestone"] == "Milestone 8" and check["passed"] is True for check in audit_payload["checks"])
+    assert any(check["milestone"] == "Milestone 9" for check in audit_payload["checks"])

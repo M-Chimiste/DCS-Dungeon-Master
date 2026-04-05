@@ -40,6 +40,7 @@ from dcs_dungeon_master.integration.olympus import OlympusClient
 from dcs_dungeon_master.model_adapter import ModelAdapterRegistry
 from dcs_dungeon_master.observation import ObservationBuilder
 from dcs_dungeon_master.persistence import SQLiteStateStore
+from dcs_dungeon_master.integration.ingest import IntegrationIngestCoordinator
 
 
 @dataclass(slots=True)
@@ -778,6 +779,7 @@ class LiveCommandLoopRunner:
     action_validator: ActionValidator
     model_registry: ModelAdapterRegistry
     execution_engine: ExecutionEngine
+    ingest_coordinator: IntegrationIngestCoordinator | None = None
 
     @property
     def status(self) -> str:
@@ -791,12 +793,19 @@ class LiveCommandLoopRunner:
         now: datetime | None = None,
         seconds_since_last_cycle: int = 30,
     ) -> DecisionCycleResult:
+        if self.ingest_coordinator is not None:
+            self.ingest_coordinator.ingest_once(run_id, occurred_at=now)
+        multimodal_submission = {
+            coalition: self.model_registry.capability_for(self.model_registry.resolve_backend_name(coalition)).supports_multimodal
+            for coalition in Coalition
+        }
         red_observation, blue_observation = self.observation_builder.build_observation_pair(
             run_id,
             decision_cycle,
             now=now,
             seconds_since_last_cycle=seconds_since_last_cycle,
             persist=True,
+            multimodal_submission=multimodal_submission,
         )
         red_invocation, red_execution = self._invoke_validate_execute(run_id, Coalition.RED, red_observation)
         blue_invocation, blue_execution = self._invoke_validate_execute(run_id, Coalition.BLUE, blue_observation)
@@ -872,7 +881,13 @@ class LiveCommandLoopRunner:
     ) -> tuple[ModelInvocationResult, ExecutionBatchResult | None]:
         from dcs_dungeon_master.model_adapter import DryDecisionLoopRunner
 
-        dry_runner = DryDecisionLoopRunner(self.store, self.observation_builder, self.action_validator, self.model_registry)
+        dry_runner = DryDecisionLoopRunner(
+            self.store,
+            self.observation_builder,
+            self.action_validator,
+            self.model_registry,
+            ingest_coordinator=None,
+        )
         invocation = dry_runner._invoke_and_validate(run_id, coalition, artifact)  # noqa: SLF001
         if invocation.validation_batch_id is None:
             return invocation, None

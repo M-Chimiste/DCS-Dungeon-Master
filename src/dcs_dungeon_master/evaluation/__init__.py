@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from dataclasses import replace
+from dataclasses import asdict, replace
 from datetime import UTC, datetime
 import hashlib
 import json
+from pathlib import Path
 from typing import Any
 
 from dcs_dungeon_master.action_validation import ActionValidator
@@ -39,12 +40,14 @@ from dcs_dungeon_master.core.models import (
 )
 from dcs_dungeon_master.core.versions import ACTION_SCHEMA_VERSION, OBSERVATION_SCHEMA_VERSION
 from dcs_dungeon_master.execution import ExecutionEngine, LiveCommandLoopRunner
-from dcs_dungeon_master.integration import build_integration_services
+from dcs_dungeon_master.integration import IntegrationIngestCoordinator, build_integration_services
 from dcs_dungeon_master.model_adapter import DryDecisionLoopRunner, build_model_registry
 from dcs_dungeon_master.observation import ObservationBuilder
+from dcs_dungeon_master.operator_control import OperatorControlService
 from dcs_dungeon_master.persistence import SQLiteStateStore
 from dcs_dungeon_master.scenario_state.registry import get_scenario_definition
 from dcs_dungeon_master.sensor_fusion import SensorFusionService
+from dcs_dungeon_master.world_state import WorldStateRepository, WorldStateUpdater
 
 
 def build_evaluation_metadata(
@@ -224,6 +227,13 @@ class EvaluationService:
 
         scenario = get_scenario_definition(config.scenario.id, config.scenario.registry_path)
         results: list[MatrixCaseResult] = []
+        output_root = (
+            Path("artifacts/eval")
+            / config.evaluation.profile_name
+            / datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
+        )
+        output_root.mkdir(parents=True, exist_ok=True)
+        operator = OperatorControlService(self.store)
         for case in config.evaluation.matrix_cases:
             for repeat_index in range(1, case.repeat_count + 1):
                 if case.visual_attachment:
@@ -269,6 +279,7 @@ class EvaluationService:
                     else:
                         self._run_live_case(case_config, scenario, run_id, case.run_cycles, case.decision_cadence_sec)
                     summary = self.evaluate_run(run_id)
+                    operator.export_replay_bundle(run_id, output_root / f"{case.id}_repeat_{repeat_index}")
                     case_result = MatrixCaseResult(
                         id=None,
                         profile_name=config.evaluation.profile_name,
@@ -316,10 +327,50 @@ class EvaluationService:
             skipped_case_count=sum(1 for item in results if item.status is MatrixCaseStatus.SKIPPED_UNSUPPORTED),
         )
         self.store.save_matrix_run_report(report)
+        (output_root / "matrix_report.json").write_text(json.dumps(asdict(report), indent=2, sort_keys=True, default=str), encoding="utf-8")
+        (output_root / "SUMMARY.md").write_text(self._render_matrix_summary(report), encoding="utf-8")
         return report
 
     def get_matrix_report(self, profile_name: str) -> MatrixRunReport:
         return self.store.get_matrix_run_report(profile_name)
+
+    def milestone9_completion_status(self, run_id: str | None = None, profile_name: str | None = None) -> dict[str, Any]:
+        resolved_run_id = run_id or self.store.get_latest_run_id()
+        summary = self.store.get_evaluation_run_summary(resolved_run_id)
+        findings = self.store.list_fairness_findings(resolved_run_id)
+        replay_exports = self.store.list_replay_export_results(resolved_run_id)
+        try:
+            matrix_report = self.store.get_matrix_run_report(profile_name or summary.run_metadata.get("profile_name", ""))
+        except Exception:  # noqa: BLE001
+            matrix_report = None
+        live_case_completed = (
+            matrix_report is not None
+            and any(item.status is MatrixCaseStatus.COMPLETED and item.mode == "live" for item in matrix_report.case_results)
+        )
+        evaluation_artifacts_exported = any(
+            export.includes_evaluation_summary
+            and export.includes_cycle_evaluations
+            and export.includes_fairness_findings
+            for export in replay_exports
+        )
+        return {
+            "run_id": resolved_run_id,
+            "profile_name": profile_name or summary.run_metadata.get("profile_name"),
+            "evaluation_summary_present": True,
+            "fairness_finding_count": len(findings),
+            "matrix_report_present": matrix_report is not None,
+            "replay_export_present": bool(replay_exports),
+            "evaluation_artifacts_exported": evaluation_artifacts_exported,
+            "completed_live_case_count": (
+                sum(1 for item in matrix_report.case_results if item.status is MatrixCaseStatus.COMPLETED and item.mode == "live")
+                if matrix_report is not None
+                else 0
+            ),
+            "operational_baseline_evidence_present": live_case_completed,
+            "code_closeout_ready": bool(matrix_report is not None and evaluation_artifacts_exported),
+            "findings_pending_review": summary.findings_pending_review,
+            "fairness_rating": summary.fairness_rating.value,
+        }
 
     def _build_run_summary(
         self,
@@ -697,11 +748,20 @@ class EvaluationService:
 
     def _run_dry_case(self, config: AppConfig, scenario, run_id: str, cycles: int, cadence_sec: int) -> None:
         store = self.store
-        observation_builder = ObservationBuilder(store, scenario, SensorFusionService(store, scenario, config.fog_of_war))
+        world_repository = WorldStateRepository(store)
+        world_updater = WorldStateUpdater(world_repository, scenario)
+        observation_builder = ObservationBuilder(store, scenario, SensorFusionService(store, scenario, config.fog_of_war), config.multimodal)
         validator = ActionValidator(store, scenario)
         registry = build_model_registry(config)
+        integrations = build_integration_services(config.dcs)
         try:
-            runner = DryDecisionLoopRunner(store, observation_builder, validator, registry)
+            runner = DryDecisionLoopRunner(
+                store,
+                observation_builder,
+                validator,
+                registry,
+                IntegrationIngestCoordinator(integrations, world_updater),
+            )
             runner.run_decision_loop(
                 run_id,
                 start_decision_cycle=1,
@@ -710,10 +770,13 @@ class EvaluationService:
             )
         finally:
             registry.close()
+            integrations.close()
 
     def _run_live_case(self, config: AppConfig, scenario, run_id: str, cycles: int, cadence_sec: int) -> None:
         store = self.store
-        observation_builder = ObservationBuilder(store, scenario, SensorFusionService(store, scenario, config.fog_of_war))
+        world_repository = WorldStateRepository(store)
+        world_updater = WorldStateUpdater(world_repository, scenario)
+        observation_builder = ObservationBuilder(store, scenario, SensorFusionService(store, scenario, config.fog_of_war), config.multimodal)
         validator = ActionValidator(store, scenario)
         registry = build_model_registry(config)
         integrations = build_integration_services(config.dcs)
@@ -724,6 +787,7 @@ class EvaluationService:
                 validator,
                 registry,
                 ExecutionEngine(store, scenario, integrations.olympus),
+                IntegrationIngestCoordinator(integrations, world_updater),
             )
             runner.run_live_loop(
                 run_id,
@@ -734,6 +798,24 @@ class EvaluationService:
         finally:
             registry.close()
             integrations.close()
+
+    def _render_matrix_summary(self, report: MatrixRunReport) -> str:
+        lines = [
+            f"# {report.profile_name} Matrix Summary",
+            "",
+            f"Generated: {report.generated_at.isoformat()}",
+            "",
+            f"- Completed cases: {report.completed_case_count}",
+            f"- Failed cases: {report.failed_case_count}",
+            f"- Skipped cases: {report.skipped_case_count}",
+            "",
+        ]
+        for item in report.case_results:
+            lines.append(
+                f"- {item.case_id} repeat {item.repeat_index}: {item.status.value}"
+                + (f" ({item.detail})" if item.detail else "")
+            )
+        return "\n".join(lines) + "\n"
 
     def _central_control_share(self, observations: tuple[ObservationArtifact, ...]) -> dict[str, float]:
         high_points = {point.id for point in self.scenario.control_points if point.strategic_value == "high"}
@@ -900,5 +982,10 @@ def _config_for_matrix_case(config: AppConfig, case_id: str) -> AppConfig:
     return replace(
         config,
         models=tuple(updated_models),
-        model_routing=ModelRoutingConfig(red_backend=case.red_backend, blue_backend=case.blue_backend),
+        model_routing=ModelRoutingConfig(
+            red_backend=case.red_backend,
+            blue_backend=case.blue_backend,
+            red_fallback_backend=config.model_routing.red_fallback_backend,
+            blue_fallback_backend=config.model_routing.blue_fallback_backend,
+        ),
     )

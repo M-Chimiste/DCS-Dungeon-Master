@@ -30,7 +30,7 @@ hosting_mode = "local"
 endpoint = "http://127.0.0.1:1234/v1"
 model = "gemma-4-26b-a4b-it"
 enabled = true
-multimodal = false
+multimodal = true
 timeout_sec = 30.0
 max_retries = 1
 temperature = 0.2
@@ -55,7 +55,7 @@ name = "hosted_default"
 hosting_mode = "hosted"
 endpoint = "https://api.openai.com/v1"
 model = "gpt-5"
-enabled = false
+enabled = true
 multimodal = false
 api_key_env_var = "OPENAI_API_KEY"
 timeout_sec = 30.0
@@ -67,6 +67,8 @@ system_prompt_variant = "phase1_default"
 [model_routing]
 red_backend = "local_default"
 blue_backend = "local_default"
+red_fallback_backend = "hosted_default"
+blue_fallback_backend = "hosted_default"
 
 [scenario]
 id = "phase1_baseline_persian_gulf"
@@ -87,6 +89,10 @@ archive_window_sec = 1800
 adjacency_drift_enabled = true
 inference_mode = "conservative"
 debug_truth_comparison = false
+
+[multimodal]
+enabled = false
+output_dir = ".cache/dcs-dungeon-master/attachments"
 
 [evaluation]
 profile_name = "phase1_baseline"

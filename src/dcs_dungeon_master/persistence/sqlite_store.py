@@ -57,12 +57,16 @@ from dcs_dungeon_master.core.models import (
     FriendlyForceEntry,
     FusionUpdateResult,
     FusionSnapshotRecord,
+    IngestCycleResult,
     KnownControlPointView,
     KnownSectorView,
+    ModelInvocationAttempt,
     ModelInvocationResult,
+    NormalizedIntegrationBatch,
     ObservationMeta,
     ObservationArtifact,
     ObservationAttachment,
+    ObservationAttachmentArtifact,
     ResourceStateView,
     ReplayBundleManifest,
     ReplayExportResult,
@@ -342,6 +346,20 @@ class SQLiteStateStore:
                     UNIQUE (run_id, coalition, decision_cycle)
                 );
 
+                CREATE TABLE IF NOT EXISTS observation_attachment_artifacts (
+                    observation_id INTEGER NOT NULL,
+                    attachment_id TEXT NOT NULL,
+                    run_id TEXT NOT NULL,
+                    coalition TEXT NOT NULL,
+                    decision_cycle INTEGER NOT NULL,
+                    media_type TEXT NOT NULL,
+                    role TEXT NOT NULL,
+                    file_path TEXT NOT NULL,
+                    submitted_to_backend INTEGER NOT NULL,
+                    metadata_json TEXT NOT NULL,
+                    PRIMARY KEY (observation_id, attachment_id)
+                );
+
                 CREATE TABLE IF NOT EXISTS model_invocations (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     run_id TEXT NOT NULL,
@@ -363,7 +381,21 @@ class SQLiteStateStore:
                     completion_tokens INTEGER,
                     total_tokens INTEGER,
                     validation_batch_id INTEGER,
-                    wrapped_response_json TEXT
+                    wrapped_response_json TEXT,
+                    failover_used INTEGER NOT NULL DEFAULT 0,
+                    attempt_trace_json TEXT NOT NULL DEFAULT '[]'
+                );
+
+                CREATE TABLE IF NOT EXISTS ingest_cycles (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    run_id TEXT NOT NULL,
+                    occurred_at TEXT NOT NULL,
+                    mission_time TEXT,
+                    olympus_available INTEGER NOT NULL,
+                    grpc_available INTEGER NOT NULL,
+                    normalized_batch_json TEXT NOT NULL,
+                    error_classification TEXT,
+                    error_detail TEXT
                 );
 
                 CREATE TABLE IF NOT EXISTS decision_cycles (
@@ -543,6 +575,20 @@ class SQLiteStateStore:
                     generated_at TEXT NOT NULL,
                     report_json TEXT NOT NULL
                 );
+
+                CREATE TABLE IF NOT EXISTS replay_exports (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    run_id TEXT NOT NULL,
+                    output_dir TEXT NOT NULL,
+                    manifest_path TEXT NOT NULL,
+                    file_count INTEGER NOT NULL,
+                    exported_at TEXT NOT NULL,
+                    file_inventory_json TEXT NOT NULL,
+                    includes_evaluation_summary INTEGER NOT NULL,
+                    includes_cycle_evaluations INTEGER NOT NULL,
+                    includes_fairness_findings INTEGER NOT NULL,
+                    includes_matrix_report INTEGER NOT NULL
+                );
                 """
             )
             self._ensure_column(connection, "decision_cycles", "classification", "TEXT NOT NULL DEFAULT 'both_failed'")
@@ -564,6 +610,8 @@ class SQLiteStateStore:
             self._ensure_column(connection, "runs", "failed_at", "TEXT")
             self._ensure_column(connection, "runs", "terminal_reason", "TEXT")
             self._ensure_column(connection, "runs", "evaluation_metadata_json", "TEXT")
+            self._ensure_column(connection, "model_invocations", "failover_used", "INTEGER NOT NULL DEFAULT 0")
+            self._ensure_column(connection, "model_invocations", "attempt_trace_json", "TEXT NOT NULL DEFAULT '[]'")
 
     def create_run_from_scenario(
         self,
@@ -1202,6 +1250,31 @@ class SQLiteStateStore:
                 (artifact.run_id, artifact.coalition.value, artifact.decision_cycle),
             ).fetchone()
             observation_id = int(row["id"]) if row is not None else int(cursor.lastrowid)
+            connection.execute(
+                "DELETE FROM observation_attachment_artifacts WHERE observation_id = ?",
+                (observation_id,),
+            )
+            for attachment in artifact.attachment_artifacts:
+                connection.execute(
+                    """
+                    INSERT INTO observation_attachment_artifacts (
+                        observation_id, attachment_id, run_id, coalition, decision_cycle, media_type, role,
+                        file_path, submitted_to_backend, metadata_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        observation_id,
+                        attachment.attachment_id,
+                        attachment.run_id,
+                        attachment.coalition.value,
+                        attachment.decision_cycle,
+                        attachment.media_type,
+                        attachment.role,
+                        attachment.file_path,
+                        int(attachment.submitted_to_backend),
+                        _json(attachment.metadata),
+                    ),
+                )
             self.append_event(
                 connection,
                 EventRecord(
@@ -1215,6 +1288,7 @@ class SQLiteStateStore:
                         "coalition": artifact.coalition.value,
                         "decision_cycle": artifact.decision_cycle,
                         "fusion_update_id": artifact.fusion_update_id,
+                        "attachment_count": len(artifact.attachment_artifacts),
                     },
                 ),
             )
@@ -1278,8 +1352,8 @@ class SQLiteStateStore:
                     run_id, coalition, decision_cycle, backend_name, observation_id, requested_at, completed_at,
                     status, attempt_count, request_payload_json, raw_response_text, parsed_actions_json, parse_status,
                     error_detail, latency_ms, prompt_tokens, completion_tokens, total_tokens, validation_batch_id,
-                    wrapped_response_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    wrapped_response_json, failover_used, attempt_trace_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     result.run_id,
@@ -1302,6 +1376,8 @@ class SQLiteStateStore:
                     result.total_tokens,
                     result.validation_batch_id,
                     _json(result.wrapped_response_object) if result.wrapped_response_object is not None else None,
+                    int(result.failover_used),
+                    _json(tuple(asdict(item) for item in result.attempt_trace)),
                 ),
             )
             invocation_id = int(cursor.lastrowid)
@@ -1321,10 +1397,66 @@ class SQLiteStateStore:
                         "status": result.status,
                         "parse_status": result.parse_status,
                         "validation_batch_id": result.validation_batch_id,
+                        "failover_used": result.failover_used,
                     },
                 ),
             )
         return invocation_id
+
+    def save_ingest_cycle_result(self, result: IngestCycleResult) -> int:
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                INSERT INTO ingest_cycles (
+                    run_id, occurred_at, mission_time, olympus_available, grpc_available,
+                    normalized_batch_json, error_classification, error_detail
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    result.run_id,
+                    result.occurred_at.isoformat(),
+                    result.mission_time,
+                    int(result.olympus_available),
+                    int(result.grpc_available),
+                    _json(asdict(result.normalized_batch)),
+                    result.error_classification,
+                    result.error_detail,
+                ),
+            )
+            ingest_id = int(cursor.lastrowid)
+            self.append_event(
+                connection,
+                EventRecord(
+                    id=None,
+                    run_id=result.run_id,
+                    event_type="integration_ingest_cycle_persisted",
+                    entity_type="ingest_cycle",
+                    entity_id=str(ingest_id),
+                    occurred_at=result.occurred_at,
+                    payload={
+                        "mission_time": result.mission_time,
+                        "olympus_available": result.olympus_available,
+                        "grpc_available": result.grpc_available,
+                        "normalized_batch": asdict(result.normalized_batch),
+                        "error_classification": result.error_classification,
+                    },
+                ),
+            )
+        return ingest_id
+
+    def list_ingest_cycle_results(self, run_id: str) -> tuple[IngestCycleResult, ...]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT id, run_id, occurred_at, mission_time, olympus_available, grpc_available,
+                       normalized_batch_json, error_classification, error_detail
+                FROM ingest_cycles
+                WHERE run_id = ?
+                ORDER BY id
+                """,
+                (run_id,),
+            ).fetchall()
+        return tuple(self._row_to_ingest_cycle_result(row) for row in rows)
 
     def get_latest_model_invocation(self, run_id: str, coalition: Coalition) -> ModelInvocationResult:
         with self._connect() as connection:
@@ -1333,7 +1465,7 @@ class SQLiteStateStore:
                 SELECT id, run_id, coalition, decision_cycle, backend_name, observation_id, requested_at, completed_at,
                        status, attempt_count, request_payload_json, raw_response_text, parsed_actions_json, parse_status,
                        error_detail, latency_ms, prompt_tokens, completion_tokens, total_tokens, validation_batch_id,
-                       wrapped_response_json
+                       wrapped_response_json, failover_used, attempt_trace_json
                 FROM model_invocations
                 WHERE run_id = ? AND coalition = ?
                 ORDER BY id DESC
@@ -1354,7 +1486,7 @@ class SQLiteStateStore:
             SELECT id, run_id, coalition, decision_cycle, backend_name, observation_id, requested_at, completed_at,
                    status, attempt_count, request_payload_json, raw_response_text, parsed_actions_json, parse_status,
                    error_detail, latency_ms, prompt_tokens, completion_tokens, total_tokens, validation_batch_id,
-                   wrapped_response_json
+                   wrapped_response_json, failover_used, attempt_trace_json
             FROM model_invocations
             WHERE run_id = ?
         """
@@ -1878,6 +2010,44 @@ class SQLiteStateStore:
         if row is None:
             raise PersistenceError(f"No matrix report found for profile '{profile_name}'.")
         return self._row_to_matrix_run_report(row)
+
+    def save_replay_export_result(self, result: ReplayExportResult) -> int:
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                INSERT INTO replay_exports (
+                    run_id, output_dir, manifest_path, file_count, exported_at, file_inventory_json,
+                    includes_evaluation_summary, includes_cycle_evaluations, includes_fairness_findings, includes_matrix_report
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    result.run_id,
+                    result.output_dir,
+                    result.manifest_path,
+                    result.file_count,
+                    (result.exported_at or datetime.now(UTC)).isoformat(),
+                    _json(list(result.file_inventory)),
+                    int(result.includes_evaluation_summary),
+                    int(result.includes_cycle_evaluations),
+                    int(result.includes_fairness_findings),
+                    int(result.includes_matrix_report),
+                ),
+            )
+        return int(cursor.lastrowid)
+
+    def list_replay_export_results(self, run_id: str) -> tuple[ReplayExportResult, ...]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT run_id, output_dir, manifest_path, file_count, exported_at, file_inventory_json,
+                       includes_evaluation_summary, includes_cycle_evaluations, includes_fairness_findings, includes_matrix_report
+                FROM replay_exports
+                WHERE run_id = ?
+                ORDER BY id
+                """,
+                (run_id,),
+            ).fetchall()
+        return tuple(self._row_to_replay_export_result(row) for row in rows)
 
     def apply_execution_state_updates(
         self,
@@ -2969,6 +3139,17 @@ class SQLiteStateStore:
 
     def _row_to_observation_artifact(self, row: sqlite3.Row) -> ObservationArtifact:
         payload = json.loads(row["payload_json"])
+        with self._connect() as connection:
+            attachment_rows = connection.execute(
+                """
+                SELECT attachment_id, run_id, coalition, decision_cycle, media_type, role, file_path,
+                       submitted_to_backend, metadata_json
+                FROM observation_attachment_artifacts
+                WHERE observation_id = ?
+                ORDER BY attachment_id
+                """,
+                (row["id"],),
+            ).fetchall()
         observation = CommanderObservation(
             meta=ObservationMeta(
                 schema_version=payload["meta"]["schema_version"],
@@ -3095,6 +3276,20 @@ class SQLiteStateStore:
             fusion_update_id=row["fusion_update_id"],
             observation=observation,
             narrative=row["narrative_text"],
+            attachment_artifacts=tuple(
+                ObservationAttachmentArtifact(
+                    attachment_id=item["attachment_id"],
+                    run_id=item["run_id"],
+                    coalition=Coalition(item["coalition"]),
+                    decision_cycle=item["decision_cycle"],
+                    media_type=item["media_type"],
+                    role=item["role"],
+                    file_path=item["file_path"],
+                    submitted_to_backend=bool(item["submitted_to_backend"]),
+                    metadata=json.loads(item["metadata_json"]),
+                )
+                for item in attachment_rows
+            ),
         )
 
     def _row_to_action_validation_batch(
@@ -3155,6 +3350,24 @@ class SQLiteStateStore:
             total_tokens=row["total_tokens"],
             validation_batch_id=row["validation_batch_id"],
             wrapped_response_object=json.loads(row["wrapped_response_json"]) if row["wrapped_response_json"] else None,
+            failover_used=bool(row["failover_used"]),
+            attempt_trace=tuple(
+                ModelInvocationAttempt(**item) for item in json.loads(row["attempt_trace_json"] or "[]")
+            ),
+        )
+
+    def _row_to_ingest_cycle_result(self, row: sqlite3.Row) -> IngestCycleResult:
+        normalized_batch = json.loads(row["normalized_batch_json"])
+        return IngestCycleResult(
+            id=row["id"],
+            run_id=row["run_id"],
+            occurred_at=datetime.fromisoformat(row["occurred_at"]),
+            mission_time=row["mission_time"],
+            olympus_available=bool(row["olympus_available"]),
+            grpc_available=bool(row["grpc_available"]),
+            normalized_batch=NormalizedIntegrationBatch(**normalized_batch),
+            error_classification=row["error_classification"],
+            error_detail=row["error_detail"],
         )
 
     def _row_to_execution_batch_result(
@@ -3394,6 +3607,20 @@ class SQLiteStateStore:
             completed_case_count=payload["completed_case_count"],
             failed_case_count=payload["failed_case_count"],
             skipped_case_count=payload["skipped_case_count"],
+        )
+
+    def _row_to_replay_export_result(self, row: sqlite3.Row) -> ReplayExportResult:
+        return ReplayExportResult(
+            run_id=row["run_id"],
+            output_dir=row["output_dir"],
+            manifest_path=row["manifest_path"],
+            file_count=row["file_count"],
+            exported_at=_parse_dt(row["exported_at"]),
+            file_inventory=tuple(json.loads(row["file_inventory_json"])),
+            includes_evaluation_summary=bool(row["includes_evaluation_summary"]),
+            includes_cycle_evaluations=bool(row["includes_cycle_evaluations"]),
+            includes_fairness_findings=bool(row["includes_fairness_findings"]),
+            includes_matrix_report=bool(row["includes_matrix_report"]),
         )
 
     def _connect(self) -> sqlite3.Connection:

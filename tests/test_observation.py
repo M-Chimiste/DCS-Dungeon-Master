@@ -4,7 +4,7 @@ from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from dcs_dungeon_master.core.config import FogOfWarConfig
+from dcs_dungeon_master.core.config import FogOfWarConfig, MultimodalConfig
 from dcs_dungeon_master.core.enums import Coalition
 from dcs_dungeon_master.integration.types import GrpcStreamEnvelope, OlympusAirfieldSnapshot
 from dcs_dungeon_master.observation import ObservationBuilder
@@ -79,8 +79,7 @@ def test_build_observation_pair_enforces_side_isolation(tmp_path: Path) -> None:
         "attachments",
     }
     assert len(red_artifact.observation.friendly_forces) == 5
-    assert len(red_artifact.observation.attachments) == 1
-    assert red_artifact.observation.attachments[0].role == "map_overlay_placeholder"
+    assert len(red_artifact.observation.attachments) == 0
     assert any(contact.contact_id == "blue_detected_sam" for contact in red_artifact.observation.enemy_contacts)
     assert all(contact.contact_id != "blue_detected_sam" for contact in blue_artifact.observation.enemy_contacts)
     assert "blue_rear_ad" not in red_artifact.narrative
@@ -134,9 +133,39 @@ def test_render_latest_supports_json_and_narrative(tmp_path: Path) -> None:
 
     assert isinstance(rendered_json, dict)
     assert rendered_json["meta"]["coalition"] == "red"
-    assert len(rendered_json["attachments"]) == 1
+    assert len(rendered_json["attachments"]) == 0
     assert isinstance(rendered_bundle, dict)
     assert rendered_bundle["canonical"]["meta"]["coalition"] == "red"
     assert isinstance(rendered_narrative, str)
     assert "REDFOR" not in rendered_narrative  # narrative should use actual coalition casing from builder
     assert "RED commander picture" in rendered_narrative
+
+
+def test_multimodal_enabled_builds_real_attachment_artifact(tmp_path: Path) -> None:
+    store = SQLiteStateStore(tmp_path / "state.sqlite3")
+    scenario = get_scenario_definition("phase1_baseline_persian_gulf", "scenarios/index.toml")
+    run_id = store.create_run_from_scenario(scenario)
+    updater = WorldStateUpdater(WorldStateRepository(store), scenario)
+    fusion = SensorFusionService(store, scenario, FogOfWarConfig())
+    builder = ObservationBuilder(
+        store,
+        scenario,
+        fusion,
+        MultimodalConfig(enabled=True, output_dir=str(tmp_path / "attachments")),
+    )
+    now = datetime(2026, 4, 5, 12, 0, tzinfo=UTC)
+    _seed_detected_enemy(run_id, updater, now)
+
+    artifact = builder.build_observation(
+        run_id,
+        Coalition.RED,
+        1,
+        now=now + timedelta(seconds=30),
+        persist=True,
+        submit_multimodal=True,
+    )
+
+    assert len(artifact.observation.attachments) == 1
+    assert artifact.observation.attachments[0].source == "generated"
+    assert artifact.attachment_artifacts[0].submitted_to_backend is True
+    assert Path(artifact.attachment_artifacts[0].file_path).exists()

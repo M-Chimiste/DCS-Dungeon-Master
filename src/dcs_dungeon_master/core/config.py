@@ -79,6 +79,8 @@ class ModelBackendConfig:
 class ModelRoutingConfig:
     red_backend: str
     blue_backend: str
+    red_fallback_backend: str | None = None
+    blue_fallback_backend: str | None = None
 
 
 @dataclass(slots=True, frozen=True)
@@ -107,6 +109,12 @@ class FogOfWarConfig:
     adjacency_drift_enabled: bool = True
     inference_mode: InferenceMode = InferenceMode.CONSERVATIVE
     debug_truth_comparison: bool = False
+
+
+@dataclass(slots=True, frozen=True)
+class MultimodalConfig:
+    enabled: bool = False
+    output_dir: str = ".cache/dcs-dungeon-master/attachments"
 
 
 @dataclass(slots=True, frozen=True)
@@ -148,6 +156,7 @@ class AppConfig:
     persistence: PersistenceConfig = field(default_factory=lambda: PersistenceConfig(db_path=""))
     dry_run: DryRunConfig = field(default_factory=lambda: DryRunConfig(enabled=True))
     fog_of_war: FogOfWarConfig = field(default_factory=FogOfWarConfig)
+    multimodal: MultimodalConfig = field(default_factory=MultimodalConfig)
     evaluation: EvaluationProfileConfig = field(default_factory=EvaluationProfileConfig)
 
     def to_dict(self) -> dict[str, Any]:
@@ -263,6 +272,11 @@ def load_config(path: str | Path) -> AppConfig:
         fog_of_war = {}
     if not isinstance(fog_of_war, dict):
         raise ConfigError("Config section 'fog_of_war' must be a table when provided.")
+    multimodal = raw.get("multimodal", {})
+    if multimodal is None:
+        multimodal = {}
+    if not isinstance(multimodal, dict):
+        raise ConfigError("Config section 'multimodal' must be a table when provided.")
     evaluation_matrix_raw = evaluation.get("matrix_cases", [])
     if not isinstance(evaluation_matrix_raw, list):
         raise ConfigError("Config field 'evaluation.matrix_cases' must be an array of tables when provided.")
@@ -309,15 +323,33 @@ def load_config(path: str | Path) -> AppConfig:
     backend_names = {backend.name for backend in backends}
     red_backend = _require_str(model_routing, "red_backend")
     blue_backend = _require_str(model_routing, "blue_backend")
+    red_fallback_backend = _optional_str(model_routing, "red_fallback_backend")
+    blue_fallback_backend = _optional_str(model_routing, "blue_fallback_backend")
     if red_backend not in backend_names:
         raise ConfigError(f"Config field 'model_routing.red_backend' references unknown backend '{red_backend}'.")
     if blue_backend not in backend_names:
         raise ConfigError(f"Config field 'model_routing.blue_backend' references unknown backend '{blue_backend}'.")
+    if red_fallback_backend is not None and red_fallback_backend not in backend_names:
+        raise ConfigError(
+            f"Config field 'model_routing.red_fallback_backend' references unknown backend '{red_fallback_backend}'."
+        )
+    if blue_fallback_backend is not None and blue_fallback_backend not in backend_names:
+        raise ConfigError(
+            f"Config field 'model_routing.blue_fallback_backend' references unknown backend '{blue_fallback_backend}'."
+        )
     backend_by_name = {backend.name: backend for backend in backends}
     if not backend_by_name[red_backend].enabled:
         raise ConfigError(f"Config field 'model_routing.red_backend' must reference an enabled backend, got '{red_backend}'.")
     if not backend_by_name[blue_backend].enabled:
         raise ConfigError(f"Config field 'model_routing.blue_backend' must reference an enabled backend, got '{blue_backend}'.")
+    if red_fallback_backend is not None and not backend_by_name[red_fallback_backend].enabled:
+        raise ConfigError(
+            f"Config field 'model_routing.red_fallback_backend' must reference an enabled backend, got '{red_fallback_backend}'."
+        )
+    if blue_fallback_backend is not None and not backend_by_name[blue_fallback_backend].enabled:
+        raise ConfigError(
+            f"Config field 'model_routing.blue_fallback_backend' must reference an enabled backend, got '{blue_fallback_backend}'."
+        )
 
     try:
         log_format = LoggingFormat(_require_str(logging, "format"))
@@ -415,7 +447,12 @@ def load_config(path: str | Path) -> AppConfig:
             ),
         ),
         models=tuple(backends),
-        model_routing=ModelRoutingConfig(red_backend=red_backend, blue_backend=blue_backend),
+        model_routing=ModelRoutingConfig(
+            red_backend=red_backend,
+            blue_backend=blue_backend,
+            red_fallback_backend=red_fallback_backend,
+            blue_fallback_backend=blue_fallback_backend,
+        ),
         scenario=ScenarioConfig(
             id=_require_str(scenario, "id"),
             registry_path=_require_str(scenario, "registry_path"),
@@ -435,6 +472,10 @@ def load_config(path: str | Path) -> AppConfig:
             adjacency_drift_enabled=bool(fog_of_war.get("adjacency_drift_enabled", True)),
             inference_mode=inference_mode,
             debug_truth_comparison=bool(fog_of_war.get("debug_truth_comparison", False)),
+        ),
+        multimodal=MultimodalConfig(
+            enabled=bool(multimodal.get("enabled", False)),
+            output_dir=_optional_str(multimodal, "output_dir") or ".cache/dcs-dungeon-master/attachments",
         ),
         evaluation=EvaluationProfileConfig(
             profile_name=_optional_str(evaluation, "profile_name") or "phase1_baseline",

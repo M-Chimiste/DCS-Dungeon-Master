@@ -6,8 +6,10 @@ from collections import Counter
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 import json
+from pathlib import Path
 from typing import Any
 
+from dcs_dungeon_master.core.config import MultimodalConfig
 from dcs_dungeon_master.core.enums import Coalition, ConfidenceBand
 from dcs_dungeon_master.core.models import (
     CommanderObservation,
@@ -18,6 +20,7 @@ from dcs_dungeon_master.core.models import (
     KnownSectorView,
     ObservationArtifact,
     ObservationAttachment,
+    ObservationAttachmentArtifact,
     ObservationMeta,
     ReserveAvailabilityView,
     ResourceStateView,
@@ -35,6 +38,7 @@ class ObservationBuilder:
     store: SQLiteStateStore
     scenario: ScenarioDefinition
     sensor_fusion: SensorFusionService
+    multimodal: MultimodalConfig = MultimodalConfig()
 
     @property
     def status(self) -> str:
@@ -50,6 +54,7 @@ class ObservationBuilder:
         seconds_since_last_cycle: int = 30,
         persist: bool = True,
         fusion_result=None,
+        submit_multimodal: bool = False,
     ) -> ObservationArtifact:
         world = self.store.get_world_state_snapshot(run_id)
         generated_at = now or world.last_ingest_at or datetime.now(UTC)
@@ -66,7 +71,7 @@ class ObservationBuilder:
         previous_artifact = self.store.get_previous_observation(run_id, coalition, decision_cycle)
 
         sector_summary = self._build_sector_summary(world, knowledge, coalition, previous_artifact)
-        observation = CommanderObservation(
+        base_observation = CommanderObservation(
             meta=ObservationMeta(
                 schema_version=OBSERVATION_SCHEMA_VERSION,
                 coalition=coalition,
@@ -84,9 +89,41 @@ class ObservationBuilder:
             recent_changes=(),
             standing_orders=tuple(order.text for order in coalition_state.standing_orders if order.active),
             requests_for_decision=(),
-            attachments=self._build_attachment_placeholders(coalition),
+            attachments=(),
         )
-        observation = self._with_recent_changes_and_requests(observation, previous_artifact)
+        observation = self._with_recent_changes_and_requests(base_observation, previous_artifact)
+        attachment_artifacts = self._build_attachment_artifacts(
+            run_id,
+            coalition,
+            decision_cycle,
+            observation,
+            submit_to_backend=submit_multimodal,
+        )
+        observation = CommanderObservation(
+            meta=observation.meta,
+            commander_state=observation.commander_state,
+            scenario_state=observation.scenario_state,
+            resource_state=observation.resource_state,
+            sector_summary=observation.sector_summary,
+            friendly_forces=observation.friendly_forces,
+            enemy_contacts=observation.enemy_contacts,
+            recent_changes=observation.recent_changes,
+            standing_orders=observation.standing_orders,
+            requests_for_decision=observation.requests_for_decision,
+            attachments=tuple(
+                ObservationAttachment(
+                    attachment_id=item.attachment_id,
+                    media_type=item.media_type,
+                    role=item.role,
+                    description=f"Coalition-filtered {item.role.replace('_', ' ')}",
+                    uri=item.file_path,
+                    source="generated",
+                    coalition_filtered=True,
+                    metadata=item.metadata | {"submitted_to_backend": item.submitted_to_backend},
+                )
+                for item in attachment_artifacts
+            ),
+        )
         narrative = self.render_narrative(observation)
         artifact = ObservationArtifact(
             id=None,
@@ -98,6 +135,7 @@ class ObservationBuilder:
             fusion_update_id=fusion_update_id,
             observation=observation,
             narrative=narrative,
+            attachment_artifacts=attachment_artifacts,
         )
         if persist:
             artifact = ObservationArtifact(
@@ -110,6 +148,7 @@ class ObservationBuilder:
                 fusion_update_id=artifact.fusion_update_id,
                 observation=artifact.observation,
                 narrative=artifact.narrative,
+                attachment_artifacts=artifact.attachment_artifacts,
             )
         return artifact
 
@@ -121,6 +160,7 @@ class ObservationBuilder:
         now: datetime | None = None,
         seconds_since_last_cycle: int = 30,
         persist: bool = True,
+        multimodal_submission: dict[Coalition, bool] | None = None,
     ) -> tuple[ObservationArtifact, ObservationArtifact]:
         world = self.store.get_world_state_snapshot(run_id)
         generated_at = now or world.last_ingest_at or datetime.now(UTC)
@@ -136,6 +176,7 @@ class ObservationBuilder:
                 seconds_since_last_cycle=seconds_since_last_cycle,
                 persist=persist,
                 fusion_result=fusion_result,
+                submit_multimodal=(multimodal_submission or {}).get(Coalition.RED, False),
             ),
             self.build_observation(
                 run_id,
@@ -145,6 +186,7 @@ class ObservationBuilder:
                 seconds_since_last_cycle=seconds_since_last_cycle,
                 persist=persist,
                 fusion_result=fusion_result,
+                submit_multimodal=(multimodal_submission or {}).get(Coalition.BLUE, False),
             ),
         )
 
@@ -424,22 +466,86 @@ class ObservationBuilder:
             attachments=observation.attachments,
         )
 
-    def _build_attachment_placeholders(self, coalition: Coalition) -> tuple[ObservationAttachment, ...]:
+    def _build_attachment_artifacts(
+        self,
+        run_id: str,
+        coalition: Coalition,
+        decision_cycle: int,
+        observation: CommanderObservation,
+        *,
+        submit_to_backend: bool,
+    ) -> tuple[ObservationAttachmentArtifact, ...]:
+        if not self.multimodal.enabled:
+            return ()
+        output_dir = Path(self.multimodal.output_dir) / run_id / coalition.value
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output_path = output_dir / f"cycle_{decision_cycle:04d}_map_overlay.svg"
+        output_path.write_text(self._render_overlay_svg(observation), encoding="utf-8")
         return (
-            ObservationAttachment(
-                attachment_id=f"{coalition.value}_map_attachment_placeholder",
-                media_type="image/png",
-                role="map_overlay_placeholder",
-                description=(
-                    "Reserved placeholder for future coalition-filtered map imagery. "
-                    "No visual payload is attached in the current milestone."
-                ),
+            ObservationAttachmentArtifact(
+                attachment_id=f"{coalition.value}_map_overlay_cycle_{decision_cycle}",
+                run_id=run_id,
+                coalition=coalition,
+                decision_cycle=decision_cycle,
+                media_type="image/svg+xml",
+                role="map_overlay",
+                file_path=str(output_path),
+                submitted_to_backend=submit_to_backend,
                 metadata={
-                    "multimodal_enabled": False,
+                    "multimodal_enabled": True,
                     "coalition": coalition.value,
-                    "phase": "stub_only",
+                    "phase": "image_only",
                 },
             ),
+        )
+
+    def _render_overlay_svg(self, observation: CommanderObservation) -> str:
+        sectors = sorted(self.scenario.sectors, key=lambda item: item.id)
+        width = 640
+        height = 420
+        sector_x = {sector.id: 80 + index * max(1, int((width - 160) / max(len(sectors) - 1, 1))) for index, sector in enumerate(sectors)}
+        sector_y = {
+            sector.id: {"rear": 310, "support": 250, "front": 180, "contested": 110, "air_corridor": 70}.get(sector.role, 220)
+            for sector in sectors
+        }
+        sector_summary = {item.sector_id: item for item in observation.sector_summary}
+        circles = []
+        labels = []
+        for sector in sectors:
+            summary = sector_summary.get(sector.id)
+            fill = {
+                "friendly": "#4e9a51",
+                "enemy": "#c84f4f",
+                "contested": "#d89b2b",
+            }.get(summary.control_status if summary else "unknown", "#6b7280")
+            circles.append(
+                f'<circle cx="{sector_x[sector.id]}" cy="{sector_y[sector.id]}" r="30" fill="{fill}" opacity="0.75" />'
+            )
+            labels.append(
+                f'<text x="{sector_x[sector.id]}" y="{sector_y[sector.id] + 52}" text-anchor="middle" font-size="12">{sector.name}</text>'
+            )
+        contacts = []
+        for contact in observation.enemy_contacts:
+            sector_id = contact.estimated_sector or contact.last_known_sector
+            if sector_id not in sector_x:
+                continue
+            contacts.append(
+                f'<rect x="{sector_x[sector_id] - 8}" y="{sector_y[sector_id] - 8}" width="16" height="16" fill="#111827" />'
+            )
+        friendlies = []
+        for force in observation.friendly_forces:
+            sector_id = force.assigned_sector
+            if sector_id not in sector_x:
+                continue
+            friendlies.append(
+                f'<circle cx="{sector_x[sector_id]}" cy="{sector_y[sector_id] + 14}" r="6" fill="#f9fafb" stroke="#111827" stroke-width="1" />'
+            )
+        return (
+            f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">'
+            '<rect width="100%" height="100%" fill="#f3f4f6" />'
+            f'<text x="24" y="28" font-size="18">Coalition overlay: {observation.meta.coalition.value}</text>'
+            f'{"".join(circles)}{"".join(friendlies)}{"".join(contacts)}{"".join(labels)}'
+            "</svg>"
         )
 
     def _recent_changes(

@@ -65,6 +65,13 @@ class ValidationStatus(StrEnum):
     PARTIALLY_ACCEPTED = "partially_accepted"
 
 
+class ValidationEvidenceBasis(StrEnum):
+    SCENARIO_KNOWN = "scenario_known"
+    COALITION_OWNED = "coalition_owned"
+    COALITION_VISIBLE = "coalition_visible"
+    ANTI_CHEAT_BOUNDARY = "anti_cheat_boundary"
+
+
 class ExecutionStatus(StrEnum):
     SUCCEEDED = "succeeded"
     PARTIALLY_SUCCEEDED = "partially_succeeded"

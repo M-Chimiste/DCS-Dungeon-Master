@@ -14,7 +14,7 @@ from dcs_dungeon_master.core.logging import configure_logging
 from dcs_dungeon_master.core.versions import ACTION_SCHEMA_VERSION, APP_VERSION, OBSERVATION_SCHEMA_VERSION
 from dcs_dungeon_master.evaluation import EvaluationService, build_evaluation_metadata
 from dcs_dungeon_master.execution import ExecutionEngine, LiveCommandLoopRunner
-from dcs_dungeon_master.integration import build_integration_services
+from dcs_dungeon_master.integration import IntegrationIngestCoordinator, build_integration_services
 from dcs_dungeon_master.model_adapter import DryDecisionLoopRunner, build_model_registry
 from dcs_dungeon_master.observation import ObservationBuilder
 from dcs_dungeon_master.operator_control import OperatorControlService
@@ -78,20 +78,29 @@ def bootstrap_application(config_path: str | Path = DEFAULT_CONFIG_PATH) -> Appl
     world_repository = WorldStateRepository(store)
     world_updater = WorldStateUpdater(world_repository, scenario)
     sensor_fusion = SensorFusionService(store, scenario, config.fog_of_war)
-    observation_builder = ObservationBuilder(store, scenario, sensor_fusion)
+    observation_builder = ObservationBuilder(store, scenario, sensor_fusion, config.multimodal)
     action_validator = ActionValidator(store, scenario)
     model_registry = build_model_registry(config)
-    dry_loop = DryDecisionLoopRunner(store, observation_builder, action_validator, model_registry)
     debug_view = KnowledgeDebugView(store, sensor_fusion)
     operator_control = OperatorControlService(store, sensor_fusion=sensor_fusion, world_repository=world_repository)
     evaluation = EvaluationService(store, scenario)
 
     integrations = build_integration_services(config.dcs)
+    ingest_coordinator = IntegrationIngestCoordinator(integrations, world_updater)
+    dry_loop = DryDecisionLoopRunner(store, observation_builder, action_validator, model_registry, ingest_coordinator)
     execution_engine = ExecutionEngine(store, scenario, integrations.olympus)
-    live_loop = LiveCommandLoopRunner(store, observation_builder, action_validator, model_registry, execution_engine)
+    live_loop = LiveCommandLoopRunner(
+        store,
+        observation_builder,
+        action_validator,
+        model_registry,
+        execution_engine,
+        ingest_coordinator,
+    )
     services = {
         "olympus_gateway": "client-ready",
         "dcs_grpc_gateway": "client-ready",
+        "integration_ingest": ingest_coordinator.status,
         "world_state": world_updater.status,
         "sensor_fusion": sensor_fusion.status,
         "observation_builder": observation_builder.status,

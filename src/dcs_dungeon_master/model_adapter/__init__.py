@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime
+import base64
 import json
 import os
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -19,11 +21,14 @@ from dcs_dungeon_master.core.models import (
     DecisionCycleResult,
     LoopRunResult,
     ModelBackendCapability,
+    ModelInvocationAttempt,
+    ModelInvocationChainResult,
     ModelInvocationRequest,
     ModelInvocationResult,
     ObservationArtifact,
     ParsedActionProposal,
 )
+from dcs_dungeon_master.integration.ingest import IntegrationIngestCoordinator
 from dcs_dungeon_master.core.versions import ACTION_SCHEMA_VERSION
 from dcs_dungeon_master.observation import ObservationBuilder
 from dcs_dungeon_master.persistence import SQLiteStateStore
@@ -235,8 +240,24 @@ class ModelAdapterRegistry:
     def resolve_backend_name(self, coalition: Coalition) -> str:
         return self.routing.red_backend if coalition is Coalition.RED else self.routing.blue_backend
 
+    def resolve_fallback_backend_name(self, coalition: Coalition) -> str | None:
+        return self.routing.red_fallback_backend if coalition is Coalition.RED else self.routing.blue_fallback_backend
+
     def resolve_backend(self, coalition: Coalition) -> OpenAICompatibleAdapter:
         return self.backends[self.resolve_backend_name(coalition)]
+
+    def resolve_backend_chain(self, coalition: Coalition) -> tuple[tuple[str, OpenAICompatibleAdapter], ...]:
+        names = [self.resolve_backend_name(coalition)]
+        fallback = self.resolve_fallback_backend_name(coalition)
+        if fallback and fallback not in names:
+            names.append(fallback)
+        return tuple((name, self.backends[name]) for name in names)
+
+    def capability_for(self, backend_name: str) -> ModelBackendCapability:
+        for item in self.capabilities:
+            if item.backend_name == backend_name:
+                return item
+        raise KeyError(backend_name)
 
     def check_health(self) -> tuple[ModelBackendHealthStatus, ...]:
         return tuple(self.backends[name].check_health() for name in sorted(self.backends))
@@ -255,6 +276,7 @@ class DryDecisionLoopRunner:
     observation_builder: ObservationBuilder
     action_validator: ActionValidator
     model_registry: ModelAdapterRegistry
+    ingest_coordinator: IntegrationIngestCoordinator | None = None
 
     @property
     def status(self) -> str:
@@ -268,12 +290,16 @@ class DryDecisionLoopRunner:
         now: datetime | None = None,
         seconds_since_last_cycle: int = 30,
     ) -> DecisionCycleResult:
+        if self.ingest_coordinator is not None:
+            self.ingest_coordinator.ingest_once(run_id, occurred_at=now)
+        multimodal_submission = self._multimodal_submission_map()
         red_observation, blue_observation = self.observation_builder.build_observation_pair(
             run_id,
             decision_cycle,
             now=now,
             seconds_since_last_cycle=seconds_since_last_cycle,
             persist=True,
+            multimodal_submission=multimodal_submission,
         )
         red_result = self._invoke_and_validate(run_id, Coalition.RED, red_observation)
         blue_result = self._invoke_and_validate(run_id, Coalition.BLUE, blue_observation)
@@ -362,10 +388,8 @@ class DryDecisionLoopRunner:
         coalition: Coalition,
         artifact: ObservationArtifact,
     ) -> ModelInvocationResult:
-        backend_name = self.model_registry.resolve_backend_name(coalition)
-        backend = self.model_registry.resolve_backend(coalition)
-        request = self._build_request(run_id, coalition, artifact, backend_name, backend.config)
-        result = backend.invoke(request)
+        chain_result = self._invoke_with_failover(run_id, coalition, artifact)
+        result = chain_result.final_result
         validation_batch_id: int | None = None
         if result.status == "succeeded":
             validation_batch = self.action_validator.validate_payload(
@@ -380,6 +404,41 @@ class DryDecisionLoopRunner:
             result = replace(result, validation_batch_id=validation_batch_id)
         result = replace(result, id=self.store.save_model_invocation_result(result))
         return result
+
+    def _invoke_with_failover(
+        self,
+        run_id: str,
+        coalition: Coalition,
+        artifact: ObservationArtifact,
+    ) -> ModelInvocationChainResult:
+        attempts: list[ModelInvocationAttempt] = []
+        final_result: ModelInvocationResult | None = None
+        chain = self.model_registry.resolve_backend_chain(coalition)
+        for index, (backend_name, backend) in enumerate(chain):
+            request = self._build_request(run_id, coalition, artifact, backend_name, backend.config)
+            result = backend.invoke(request)
+            attempts.append(
+                ModelInvocationAttempt(
+                    backend_name=backend_name,
+                    status=result.status,
+                    parse_status=result.parse_status,
+                    error_detail=result.error_detail,
+                )
+            )
+            final_result = replace(
+                result,
+                backend_name=backend_name,
+                failover_used=index > 0,
+                attempt_trace=tuple(attempts),
+            )
+            if result.status == "succeeded" or index == len(chain) - 1:
+                break
+        assert final_result is not None
+        return ModelInvocationChainResult(
+            final_result=final_result,
+            attempts=tuple(attempts),
+            fallback_used=final_result.failover_used,
+        )
 
     def _build_request(
         self,
@@ -409,7 +468,10 @@ class DryDecisionLoopRunner:
             "temperature": backend_config.temperature,
             "messages": [
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": json.dumps(user_payload, sort_keys=True, default=str)},
+                {
+                    "role": "user",
+                    "content": self._build_user_content(artifact, user_payload, backend_config.multimodal),
+                },
             ],
             "response_format": {
                 "type": "json_schema",
@@ -431,6 +493,35 @@ class DryDecisionLoopRunner:
             user_payload=user_payload,
             request_payload=request_payload,
         )
+
+    def _build_user_content(
+        self,
+        artifact: ObservationArtifact,
+        user_payload: dict[str, Any],
+        allow_multimodal: bool,
+    ) -> str | list[dict[str, Any]]:
+        text_payload = json.dumps(user_payload, sort_keys=True, default=str)
+        if not allow_multimodal:
+            return text_payload
+        image_parts = []
+        for attachment in artifact.attachment_artifacts:
+            if not attachment.submitted_to_backend:
+                continue
+            image_parts.append({"type": "image_url", "image_url": {"url": self._attachment_data_url(attachment.file_path, attachment.media_type)}})
+        if not image_parts:
+            return text_payload
+        return [{"type": "text", "text": text_payload}, *image_parts]
+
+    @staticmethod
+    def _attachment_data_url(file_path: str, media_type: str) -> str:
+        payload = Path(file_path).read_bytes()
+        return f"data:{media_type};base64,{base64.b64encode(payload).decode('ascii')}"
+
+    def _multimodal_submission_map(self) -> dict[Coalition, bool]:
+        return {
+            coalition: self.model_registry.capability_for(self.model_registry.resolve_backend_name(coalition)).supports_multimodal
+            for coalition in Coalition
+        }
 
     def _classify_cycle(self, red_result: ModelInvocationResult, blue_result: ModelInvocationResult) -> str:
         red_ok = red_result.status == "succeeded"

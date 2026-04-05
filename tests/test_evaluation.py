@@ -12,6 +12,7 @@ from dcs_dungeon_master.core.enums import FairnessReviewStatus, MatrixCaseStatus
 from dcs_dungeon_master.evaluation import EvaluationService, build_evaluation_metadata
 from dcs_dungeon_master.model_adapter import DryDecisionLoopRunner, build_model_registry
 from dcs_dungeon_master.observation import ObservationBuilder
+from dcs_dungeon_master.operator_control import OperatorControlService
 from dcs_dungeon_master.persistence import SQLiteStateStore
 from dcs_dungeon_master.scenario_state.registry import get_scenario_definition
 from dcs_dungeon_master.sensor_fusion import SensorFusionService
@@ -187,6 +188,15 @@ def test_evaluation_service_persists_summary_and_review_flow(tmp_path: Path) -> 
     assert reviewed["finding"].review_status is FairnessReviewStatus.CLEARED
     assert reviewed["summary"].fairness_score >= summary.fairness_score
 
+    operator = OperatorControlService(store)
+    operator.export_replay_bundle(run_id, tmp_path / "bundle")
+    closeout = service.milestone9_completion_status(run_id, config.evaluation.profile_name)
+
+    assert closeout["replay_export_present"] is True
+    assert closeout["evaluation_artifacts_exported"] is True
+    assert closeout["code_closeout_ready"] is False
+    assert closeout["operational_baseline_evidence_present"] is False
+
 
 def test_evaluation_matrix_skips_visual_case_and_persists_report(tmp_path: Path, monkeypatch) -> None:
     config = load_config(_write_temp_config(tmp_path))
@@ -198,8 +208,12 @@ def test_evaluation_matrix_skips_visual_case_and_persists_report(tmp_path: Path,
 
     report = service.run_matrix(config)
     persisted = service.get_matrix_report(config.evaluation.profile_name)
+    completed_run_id = next(item.run_id for item in report.case_results if item.status is MatrixCaseStatus.COMPLETED)
+    closeout = service.milestone9_completion_status(completed_run_id, config.evaluation.profile_name)
 
     assert report.completed_case_count == 1
     assert report.skipped_case_count == 1
     assert any(item.status is MatrixCaseStatus.SKIPPED_UNSUPPORTED for item in report.case_results)
     assert persisted.profile_name == config.evaluation.profile_name
+    assert closeout["replay_export_present"] is True
+    assert closeout["evaluation_artifacts_exported"] is True
