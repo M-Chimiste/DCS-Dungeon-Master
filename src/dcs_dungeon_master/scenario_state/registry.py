@@ -16,6 +16,7 @@ from dcs_dungeon_master.core.models import (
     DeploymentRestrictionState,
     ReserveGroupState,
     ScenarioDefinition,
+    ScenarioZone,
     SectorState,
     StandingOrderState,
 )
@@ -124,6 +125,7 @@ def load_scenario_definition(path: str | Path) -> ScenarioDefinition:
     coalitions_raw = raw.get("coalitions", [])
     active_groups_raw = raw.get("active_groups", [])
     reserve_groups_raw = raw.get("reserve_groups", [])
+    zones_raw = raw.get("zones", [])
     restrictions_raw = raw.get("deployment_restrictions", [])
 
     if not sectors_raw or not isinstance(sectors_raw, list):
@@ -138,6 +140,7 @@ def load_scenario_definition(path: str | Path) -> ScenarioDefinition:
     coalitions = tuple(_parse_coalition_state(item, context) for item in coalitions_raw)
     active_groups = tuple(_parse_active_group(item, context) for item in active_groups_raw)
     reserve_groups = tuple(_parse_reserve_group(item, context) for item in reserve_groups_raw)
+    zones = tuple(_parse_zone(item, context) for item in zones_raw)
     restrictions = tuple(_parse_restriction(item, context) for item in restrictions_raw)
 
     sector_ids = {sector.id for sector in sectors}
@@ -176,6 +179,10 @@ def load_scenario_definition(path: str | Path) -> ScenarioDefinition:
                 f"{', '.join(unknown_allowed)}."
             )
 
+    for zone in zones:
+        if zone.sector_id not in sector_ids:
+            raise ConfigError(f"{context}: zone '{zone.id}' references unknown sector '{zone.sector_id}'.")
+
     return ScenarioDefinition(
         id=_require_non_empty_string(raw, "id", context),
         version=_require_non_empty_string(raw, "version", context),
@@ -187,6 +194,7 @@ def load_scenario_definition(path: str | Path) -> ScenarioDefinition:
         coalitions=coalitions,
         active_groups=active_groups,
         reserve_groups=reserve_groups,
+        zones=zones,
         deployment_restrictions=restrictions,
     )
 
@@ -311,4 +319,25 @@ def _parse_restriction(data: dict[str, Any], context: str) -> DeploymentRestrict
         sector_ids=_optional_string_list(data, "sector_ids", context),
         control_point_ids=_optional_string_list(data, "control_point_ids", context),
         adjacency_limited=bool(data.get("adjacency_limited", False)),
+    )
+
+
+def _parse_zone(data: dict[str, Any], context: str) -> ScenarioZone:
+    if not isinstance(data, dict):
+        raise ConfigError(f"{context}: zone entries must be tables.")
+    center_lat = data.get("center_lat")
+    center_lng = data.get("center_lng")
+    radius_nm = data.get("radius_nm")
+    if not isinstance(center_lat, int | float) or not isinstance(center_lng, int | float):
+        raise ConfigError(f"{context}: zone center coordinates must be numeric.")
+    if not isinstance(radius_nm, int | float) or float(radius_nm) <= 0:
+        raise ConfigError(f"{context}: zone 'radius_nm' must be a positive number.")
+    return ScenarioZone(
+        id=_require_non_empty_string(data, "id", context),
+        name=_require_non_empty_string(data, "name", context),
+        sector_id=_require_non_empty_string(data, "sector_id", context),
+        center_lat=float(center_lat),
+        center_lng=float(center_lng),
+        radius_nm=float(radius_nm),
+        tags=_optional_string_list(data, "tags", context),
     )

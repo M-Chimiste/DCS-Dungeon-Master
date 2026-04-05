@@ -76,8 +76,11 @@ def test_build_observation_pair_enforces_side_isolation(tmp_path: Path) -> None:
         "recent_changes",
         "standing_orders",
         "requests_for_decision",
+        "attachments",
     }
     assert len(red_artifact.observation.friendly_forces) == 5
+    assert len(red_artifact.observation.attachments) == 1
+    assert red_artifact.observation.attachments[0].role == "map_overlay_placeholder"
     assert any(contact.contact_id == "blue_detected_sam" for contact in red_artifact.observation.enemy_contacts)
     assert all(contact.contact_id != "blue_detected_sam" for contact in blue_artifact.observation.enemy_contacts)
     assert "blue_rear_ad" not in red_artifact.narrative
@@ -131,6 +134,7 @@ def test_render_latest_supports_json_and_narrative(tmp_path: Path) -> None:
 
     assert isinstance(rendered_json, dict)
     assert rendered_json["meta"]["coalition"] == "red"
+    assert len(rendered_json["attachments"]) == 1
     assert isinstance(rendered_bundle, dict)
     assert rendered_bundle["canonical"]["meta"]["coalition"] == "red"
     assert isinstance(rendered_narrative, str)

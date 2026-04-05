@@ -16,6 +16,9 @@ class IntegrationServices:
     def check_health(self) -> tuple[IntegrationHealthStatus, IntegrationHealthStatus]:
         return (self.olympus.check_health(), self.dcs_grpc.check_health())
 
+    def close(self) -> None:
+        self.olympus.close()
+
 
 def build_integration_services(config: DcsConfig) -> IntegrationServices:
     return IntegrationServices(

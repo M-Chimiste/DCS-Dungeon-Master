@@ -29,6 +29,17 @@ host = "127.0.0.1"
 port = 50051
 timeout_sec = 5.0
 
+[[models]]
+name = "local_default"
+hosting_mode = "local"
+endpoint = "http://127.0.0.1:1234/v1"
+model = "gemma-4-26b-a4b-it"
+enabled = true
+
+[model_routing]
+red_backend = "local_default"
+blue_backend = "local_default"
+
 [scenario]
 id = "phase1_baseline_persian_gulf"
 registry_path = "scenarios/index.toml"
@@ -56,7 +67,13 @@ def test_bootstrap_application_without_external_dependencies(tmp_path: Path) -> 
     assert summary["service_statuses"]["world_state"] == "world-state-ready"
     assert summary["service_statuses"]["sensor_fusion"] == "sensor-fusion-ready"
     assert summary["service_statuses"]["observation_builder"] == "observation-ready"
-    assert summary["service_statuses"]["model_adapters"] == "stub-ready"
+    assert summary["service_statuses"]["action_validator"] == "action-validator-ready"
+    assert summary["service_statuses"]["model_adapters"] == "model-adapters-ready"
+    assert summary["service_statuses"]["dry_decision_loop"] == "dry-loop-ready"
+    assert summary["service_statuses"]["execution_engine"] == "execution-ready"
+    assert summary["service_statuses"]["live_command_loop"] == "live-loop-ready"
+    assert summary["service_statuses"]["operator_control"] == "operator-control-ready"
+    assert summary["service_statuses"]["evaluation"] == "evaluation-ready"
     assert summary["integration_endpoints"]["olympus"] == "http://127.0.0.1:4512"
     assert summary["integration_endpoints"]["dcs_grpc"] == "127.0.0.1:50051"
     assert summary["integration_health"] is None
@@ -91,6 +108,17 @@ port = 50051
 timeout_sec = 5.0
 secure = false
 retry_attempts = 2
+
+[[models]]
+name = "local_default"
+hosting_mode = "local"
+endpoint = "http://127.0.0.1:1234/v1"
+model = "gemma-4-26b-a4b-it"
+enabled = true
+
+[model_routing]
+red_backend = "local_default"
+blue_backend = "local_default"
 
 [scenario]
 id = "phase1_baseline_persian_gulf"

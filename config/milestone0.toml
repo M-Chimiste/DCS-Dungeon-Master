@@ -31,6 +31,11 @@ endpoint = "http://127.0.0.1:1234/v1"
 model = "gemma-4-26b-a4b-it"
 enabled = true
 multimodal = false
+timeout_sec = 30.0
+max_retries = 1
+temperature = 0.2
+max_output_tokens = 1200
+system_prompt_variant = "phase1_default"
 
 [[models]]
 name = "lan_default"
@@ -39,6 +44,11 @@ endpoint = "http://192.168.1.10:1234/v1"
 model = "gemma-4-26b-a4b-it"
 enabled = false
 multimodal = false
+timeout_sec = 30.0
+max_retries = 1
+temperature = 0.2
+max_output_tokens = 1200
+system_prompt_variant = "phase1_default"
 
 [[models]]
 name = "hosted_default"
@@ -48,6 +58,15 @@ model = "gpt-5"
 enabled = false
 multimodal = false
 api_key_env_var = "OPENAI_API_KEY"
+timeout_sec = 30.0
+max_retries = 1
+temperature = 0.2
+max_output_tokens = 1200
+system_prompt_variant = "phase1_default"
+
+[model_routing]
+red_backend = "local_default"
+blue_backend = "local_default"
 
 [scenario]
 id = "phase1_baseline_persian_gulf"
@@ -68,3 +87,42 @@ archive_window_sec = 1800
 adjacency_drift_enabled = true
 inference_mode = "conservative"
 debug_truth_comparison = false
+
+[evaluation]
+profile_name = "phase1_baseline"
+decision_cadence_sec = 30
+prompt_version = "phase1_default"
+resource_settings_version = "phase1_default"
+review_policy = "suspicious_only"
+fairness_mode = "hybrid"
+default_run_cycles = 90
+
+[[evaluation.matrix_cases]]
+id = "mirror_live"
+description = "Mirror live run with the default local backend on both sides."
+mode = "live"
+red_backend = "local_default"
+blue_backend = "local_default"
+decision_cadence_sec = 30
+run_cycles = 90
+repeat_count = 3
+
+[[evaluation.matrix_cases]]
+id = "mixed_live"
+description = "Mixed-backend live comparison."
+mode = "live"
+red_backend = "local_default"
+blue_backend = "hosted_default"
+decision_cadence_sec = 30
+run_cycles = 90
+repeat_count = 1
+
+[[evaluation.matrix_cases]]
+id = "dry_validation"
+description = "Dry validation run with full logging."
+mode = "dry"
+red_backend = "local_default"
+blue_backend = "local_default"
+decision_cadence_sec = 30
+run_cycles = 20
+repeat_count = 1

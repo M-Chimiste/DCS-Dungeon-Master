@@ -18,6 +18,8 @@ def test_sqlite_initialization_and_event_log(tmp_path: Path) -> None:
     assert events[-1].event_type == "scenario_initialized"
     assert summary["active_group_count"] == 10
     assert summary["reserve_group_count"] == 6
+    assert summary["status"] == "created"
+    assert summary["mode"] == "dry"
     assert summary["coalitions"]["red"]["budget_remaining"] == 24
     assert summary["coalitions"]["blue"]["budget_remaining"] == 24
 

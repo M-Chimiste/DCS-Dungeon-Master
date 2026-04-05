@@ -41,6 +41,12 @@ Phase 1 assumptions:
 - Replayability: every major decision boundary should be loggable and reproducible
 - Separation of concerns: perception, state, reasoning, validation, and execution should stay distinct
 
+## Current Implementation Notes
+
+- The only real model transport implemented today is an OpenAI-compatible adapter, primarily targeting LM Studio and similar endpoints.
+- Structured JSON output is the primary model-return path and is preferred over free-form text responses.
+- Multimodal support remains stub-only in the current implementation. Observation contracts can carry attachment metadata, but image and video submission are not yet active parts of the live loop.
+
 ## System Context
 
 At a high level, the harness sits between DCS World and one or more LLM backends.

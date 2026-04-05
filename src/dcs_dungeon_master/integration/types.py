@@ -12,6 +12,18 @@ class IntegrationHealthStatus:
     endpoint: str
     healthy: bool
     detail: str
+    status: str = "healthy"
+    attempt_count: int = 1
+
+
+@dataclass(slots=True, frozen=True)
+class IntegrationStreamStatus:
+    service: str
+    stream_name: str
+    endpoint: str
+    status: str
+    detail: str
+    attempt_count: int
 
 
 @dataclass(slots=True, frozen=True)

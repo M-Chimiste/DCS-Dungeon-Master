@@ -132,6 +132,42 @@ strategic_value = "high"
 lat = 25.88
 lng = 55.03
 
+[[zones]]
+id = "red_rear_fallback_zone"
+name = "Red Rear Fallback Zone"
+sector_id = "red_rear"
+center_lat = 27.08
+center_lng = 56.22
+radius_nm = 18.0
+tags = ["fallback", "rear", "support"]
+
+[[zones]]
+id = "red_front_support_zone"
+name = "Red Front Support Zone"
+sector_id = "red_front"
+center_lat = 26.84
+center_lng = 55.74
+radius_nm = 14.0
+tags = ["support", "frontline"]
+
+[[zones]]
+id = "blue_front_support_zone"
+name = "Blue Front Support Zone"
+sector_id = "blue_front"
+center_lat = 25.61
+center_lng = 54.95
+radius_nm = 14.0
+tags = ["support", "frontline"]
+
+[[zones]]
+id = "blue_rear_fallback_zone"
+name = "Blue Rear Fallback Zone"
+sector_id = "blue_rear"
+center_lat = 24.34
+center_lng = 54.44
+radius_nm = 18.0
+tags = ["fallback", "rear", "support"]
+
 [[coalitions]]
 coalition = "red"
 budget_remaining = 24

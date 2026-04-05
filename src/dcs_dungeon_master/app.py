@@ -3,18 +3,21 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
+import json
 from pathlib import Path
 import logging
 
-from dcs_dungeon_master.action_validation import ActionValidatorStub
+from dcs_dungeon_master.action_validation import ActionValidator
 from dcs_dungeon_master.core.config import AppConfig, load_config
 from dcs_dungeon_master.core.logging import configure_logging
 from dcs_dungeon_master.core.versions import ACTION_SCHEMA_VERSION, APP_VERSION, OBSERVATION_SCHEMA_VERSION
-from dcs_dungeon_master.execution import ExecutionEngineStub
+from dcs_dungeon_master.evaluation import EvaluationService, build_evaluation_metadata
+from dcs_dungeon_master.execution import ExecutionEngine, LiveCommandLoopRunner
 from dcs_dungeon_master.integration import build_integration_services
-from dcs_dungeon_master.model_adapter import ModelAdapterRegistryStub
+from dcs_dungeon_master.model_adapter import DryDecisionLoopRunner, build_model_registry
 from dcs_dungeon_master.observation import ObservationBuilder
-from dcs_dungeon_master.operator_control import OperatorControlStub
+from dcs_dungeon_master.operator_control import OperatorControlService
 from dcs_dungeon_master.persistence import SQLiteStateStore
 from dcs_dungeon_master.scenario_state.registry import get_scenario_definition
 from dcs_dungeon_master.sensor_fusion import SensorFusionService
@@ -60,30 +63,50 @@ def bootstrap_application(config_path: str | Path = DEFAULT_CONFIG_PATH) -> Appl
     scenario = get_scenario_definition(config.scenario.id, config.scenario.registry_path)
     store = SQLiteStateStore(config.persistence.db_path, enable_wal=config.persistence.enable_wal)
     store.initialize_schema()
-    run_id = store.create_run_from_scenario(scenario)
+    config_snapshot = config.to_dict()
+    config_digest = hashlib.sha256(json.dumps(config_snapshot, sort_keys=True).encode("utf-8")).hexdigest()
+    run_id = store.create_run_from_scenario(
+        scenario,
+        mode="dry" if config.runtime.dry_run and config.dry_run.enabled else "live",
+        config_digest=config_digest,
+        config_snapshot=config_snapshot,
+        red_backend_name=config.model_routing.red_backend,
+        blue_backend_name=config.model_routing.blue_backend,
+        evaluation_metadata=build_evaluation_metadata(config),
+    )
     state_summary = store.get_run_summary(run_id)
     world_repository = WorldStateRepository(store)
     world_updater = WorldStateUpdater(world_repository, scenario)
     sensor_fusion = SensorFusionService(store, scenario, config.fog_of_war)
     observation_builder = ObservationBuilder(store, scenario, sensor_fusion)
+    action_validator = ActionValidator(store, scenario)
+    model_registry = build_model_registry(config)
+    dry_loop = DryDecisionLoopRunner(store, observation_builder, action_validator, model_registry)
     debug_view = KnowledgeDebugView(store, sensor_fusion)
+    operator_control = OperatorControlService(store, sensor_fusion=sensor_fusion, world_repository=world_repository)
+    evaluation = EvaluationService(store, scenario)
 
     integrations = build_integration_services(config.dcs)
+    execution_engine = ExecutionEngine(store, scenario, integrations.olympus)
+    live_loop = LiveCommandLoopRunner(store, observation_builder, action_validator, model_registry, execution_engine)
     services = {
         "olympus_gateway": "client-ready",
         "dcs_grpc_gateway": "client-ready",
         "world_state": world_updater.status,
         "sensor_fusion": sensor_fusion.status,
         "observation_builder": observation_builder.status,
-        "model_adapters": ModelAdapterRegistryStub().status,
-        "action_validator": ActionValidatorStub().status,
-        "execution_engine": ExecutionEngineStub().status,
+        "model_adapters": model_registry.status,
+        "action_validator": action_validator.status,
+        "dry_decision_loop": dry_loop.status,
+        "execution_engine": execution_engine.status,
+        "live_command_loop": live_loop.status,
         "persistence": "sqlite-ready",
-        "operator_control": OperatorControlStub().status,
+        "operator_control": operator_control.status,
+        "evaluation": evaluation.status,
         "knowledge_debug": "debug-ready" if debug_view else "debug-unavailable",
     }
     logger.info("Bootstrapped dry-run application for scenario '%s' into run '%s'.", scenario.id, run_id)
-    return Application(
+    application = Application(
         config=config,
         scenario_id=scenario.id,
         scenario_name=scenario.name,
@@ -97,3 +120,6 @@ def bootstrap_application(config_path: str | Path = DEFAULT_CONFIG_PATH) -> Appl
         },
         integration_health=None,
     )
+    model_registry.close()
+    integrations.close()
+    return application
