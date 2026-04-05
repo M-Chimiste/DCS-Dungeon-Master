@@ -11,3 +11,15 @@ class ConfigError(DcsDungeonMasterError):
 
 class ScenarioNotFoundError(DcsDungeonMasterError):
     """Raised when a configured scenario cannot be resolved."""
+
+
+class PersistenceError(DcsDungeonMasterError):
+    """Raised when persistence operations fail."""
+
+
+class IntegrationError(DcsDungeonMasterError):
+    """Raised when integration-layer operations fail."""
+
+
+class ProtoGenerationError(DcsDungeonMasterError):
+    """Raised when vendored gRPC contracts cannot be generated or imported."""

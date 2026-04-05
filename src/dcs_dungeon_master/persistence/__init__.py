@@ -1,8 +1,5 @@
-"""Persistence stubs."""
+"""SQLite-backed persistence helpers for Phase 1."""
 
-from dataclasses import dataclass
+from dcs_dungeon_master.persistence.sqlite_store import SQLiteStateStore
 
-
-@dataclass(slots=True)
-class PersistenceStub:
-    status: str = "stub-ready"
+__all__ = ["SQLiteStateStore"]

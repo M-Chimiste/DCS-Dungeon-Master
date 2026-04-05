@@ -16,7 +16,7 @@ This is the scenario contract that the observation, action, architecture, and ev
 
 ## Scenario Name
 
-Phase 1 Baseline: Caucasus Frontier
+Phase 1 Baseline: Persian Gulf Frontier
 
 ## Design Intent
 
@@ -39,7 +39,7 @@ Included:
 
 - One REDFOR strategic commander
 - One BLUFOR strategic commander
-- A bounded Caucasus-area battlespace
+- A bounded Persian Gulf battlespace
 - Sector-based map reasoning
 - Ground-based strategic assets such as SAMs, missile launchers, and ground vehicle groups
 - Limited air activity as background pressure and contact generation where useful
@@ -54,7 +54,7 @@ Excluded from the initial scenario:
 
 ## Baseline Assumptions
 
-- Theater: Caucasus
+- Theater: Persian Gulf
 - Gameplay focus: strategic ground and air-defense positioning under contested conditions
 - Time horizon per run: 30 to 60 minutes
 - Commander decision cadence: 30 to 60 seconds
@@ -375,7 +375,7 @@ These variants should come after the baseline scenario is reliable and replayabl
 
 ## Open Questions
 
-- Which exact Caucasus locations should map to the rear airbases, forward support points, and central objectives?
+- Which exact Persian Gulf locations should map to the rear airbases, forward support points, and central objectives?
 - How much asymmetry should the first force template have, if any?
 - Should central objectives be captured by physical occupation, area control, or accumulated contest score?
 - Should the limited air layer be scripted, deterministic, or partially model-driven in Phase 1?

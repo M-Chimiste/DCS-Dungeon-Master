@@ -10,6 +10,25 @@ class Coalition(StrEnum):
     BLUE = "blue"
 
 
+class KnowledgeLevel(StrEnum):
+    UNKNOWN_PRESENCE = "unknown_presence"
+    SUSPECTED_TYPE = "suspected_type"
+    CLASSIFIED_TYPE = "classified_type"
+    CONFIRMED_TYPE = "confirmed_type"
+
+
+class ConfidenceBand(StrEnum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+
+
+class InferenceMode(StrEnum):
+    CONSERVATIVE = "conservative"
+    MODERATE = "moderate"
+    RICH = "rich"
+
+
 class ActionType(StrEnum):
     SET_SECTOR_PRIORITY = "set_sector_priority"
     DEPLOY_RESERVE_GROUP = "deploy_reserve_group"

@@ -13,11 +13,16 @@ remote_hosted = false
 [dcs.olympus]
 base_url = "http://127.0.0.1:4512"
 timeout_sec = 5.0
+verify_tls = true
+health_path = "/olympus/mission"
+retry_attempts = 1
 
 [dcs.grpc]
 host = "127.0.0.1"
 port = 50051
 timeout_sec = 5.0
+secure = false
+retry_attempts = 1
 
 [[models]]
 name = "local_default"
@@ -45,8 +50,21 @@ multimodal = false
 api_key_env_var = "OPENAI_API_KEY"
 
 [scenario]
-id = "phase1_baseline_caucasus_frontier"
+id = "phase1_baseline_persian_gulf"
+registry_path = "scenarios/index.toml"
+
+[persistence]
+db_path = ".cache/dcs-dungeon-master/state.sqlite3"
+enable_wal = true
 
 [dry_run]
 enabled = true
 summary_output = "text"
+
+[fog_of_war]
+freshness_window_sec = 300
+decay_window_sec = 900
+archive_window_sec = 1800
+adjacency_drift_enabled = true
+inference_mode = "conservative"
+debug_truth_comparison = false

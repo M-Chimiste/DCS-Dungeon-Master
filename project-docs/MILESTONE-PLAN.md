@@ -110,7 +110,7 @@ Build the scenario and persistence foundation that defines what world exists and
 
 ### Tasks
 
-- Encode the `Phase 1 Baseline: Caucasus Frontier` scenario
+- Encode the `Phase 1 Baseline: Persian Gulf Frontier` scenario
 - Represent the sector graph and control points
 - Represent coalition state, starting forces, and reserve pools
 - Represent resource budgets and deployment restrictions
