@@ -296,3 +296,46 @@ def test_web_ui_model_catalog_and_run_routing_routes(tmp_path: Path) -> None:
     assert create_payload["run"]["routing"]["blue"]["primary_source"] == "ad_hoc"
     assert routing_status == 200
     assert routing_payload["run_scoped_backends"][0]["model"] == "gpt-5"
+
+
+def test_web_ui_routing_patch_requires_created_run_and_rejects_bad_adhoc_payload(tmp_path: Path) -> None:
+    config_path = _write_temp_config(tmp_path)
+    service = WebUiService.from_config_path(config_path)
+
+    create_status, create_payload = service.dispatch(
+        "POST",
+        "/api/runs",
+        {
+            "scenario_id": "phase1_baseline_persian_gulf",
+            "mode": "dry",
+            "routing": {"shared_primary_catalog_id": "local_default"},
+        },
+    )
+    run_id = create_payload["run"]["run_id"]
+
+    bad_status, bad_payload = service.dispatch(
+        "PATCH",
+        f"/api/runs/{run_id}/routing",
+        {
+            "same_for_both": False,
+            "shared_primary_catalog_id": "local_default",
+            "blue_primary_adhoc": {
+                "endpoint": "https://api.example.test/v1",
+                "model": "gpt-5",
+                "hosting_mode": "moon",
+            },
+        },
+    )
+    start_status, _ = service.dispatch("POST", f"/api/runs/{run_id}/start", {})
+    locked_status, locked_payload = service.dispatch(
+        "PATCH",
+        f"/api/runs/{run_id}/routing",
+        {"shared_primary_catalog_id": "local_default"},
+    )
+
+    assert create_status == 200
+    assert bad_status == 400
+    assert "hosting_mode must be one of" in bad_payload["error"]
+    assert start_status == 200
+    assert locked_status == 400
+    assert "only be updated while the run is still created" in locked_payload["error"]

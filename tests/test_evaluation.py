@@ -187,6 +187,7 @@ def test_evaluation_service_persists_summary_and_review_flow(tmp_path: Path) -> 
     assert hidden_finding.review_status is FairnessReviewStatus.PENDING_REVIEW
     assert reviewed["finding"].review_status is FairnessReviewStatus.CLEARED
     assert reviewed["summary"].fairness_score >= summary.fairness_score
+    assert reviewed["summary"].findings_pending_review < summary.findings_pending_review
 
     operator = OperatorControlService(store)
     operator.export_replay_bundle(run_id, tmp_path / "bundle")

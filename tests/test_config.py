@@ -324,3 +324,64 @@ summary_output = "text"
     assert config.model_routing.blue_backend == "hosted_default"
     assert config.model_routing.default_catalog_id == "local_gemma"
     assert config.model_routing.blue_catalog_override == "hosted_gpt5"
+
+
+def test_load_config_rejects_unknown_model_catalog_backend(tmp_path: Path) -> None:
+    config_path = tmp_path / "bad-catalog.toml"
+    config_path.write_text(
+        """
+[runtime]
+app_name = "dcs_dungeon_master"
+environment = "test"
+dry_run = true
+
+[logging]
+level = "INFO"
+format = "text"
+
+[dcs]
+remote_hosted = false
+
+[dcs.olympus]
+base_url = "http://127.0.0.1:4512"
+timeout_sec = 5.0
+
+[dcs.grpc]
+host = "127.0.0.1"
+port = 50051
+timeout_sec = 5.0
+
+[[models]]
+name = "local_default"
+hosting_mode = "local"
+endpoint = "http://127.0.0.1:1234/v1"
+model = "gemma"
+enabled = true
+
+[[model_catalog]]
+id = "bad_entry"
+display_name = "Broken"
+backend_name = "missing_backend"
+server_label = "Broken"
+
+[model_routing]
+red_backend = "local_default"
+blue_backend = "local_default"
+
+[scenario]
+id = "phase1_baseline_persian_gulf"
+registry_path = "scenarios/index.toml"
+
+[persistence]
+db_path = "/tmp/dcs.sqlite3"
+enable_wal = true
+
+[dry_run]
+enabled = true
+summary_output = "text"
+""".strip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError, match="model_catalog\\[0\\]\\.backend_name"):
+        load_config(config_path)
