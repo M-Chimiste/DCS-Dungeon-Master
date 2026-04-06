@@ -9,7 +9,7 @@ import httpx
 from dcs_dungeon_master.action_validation import ActionValidator
 from dcs_dungeon_master.core.config import load_config
 from dcs_dungeon_master.core.enums import Coalition, RunLifecycleStatus
-from dcs_dungeon_master.core.models import ModelInvocationRequest
+from dcs_dungeon_master.core.models import ModelInvocationRequest, RunScopedBackendDefinition
 from dcs_dungeon_master.model_adapter import DryDecisionLoopRunner, OpenAICompatibleAdapter, build_model_registry
 from dcs_dungeon_master.observation import ObservationBuilder
 from dcs_dungeon_master.persistence import SQLiteStateStore
@@ -272,6 +272,29 @@ def test_dry_decision_cycle_persists_invocations_and_validation_results(tmp_path
         "action_type",
         "reason",
     ]
+
+
+def test_build_model_registry_merges_run_scoped_backends(tmp_path: Path) -> None:
+    config = load_config(_write_temp_config(tmp_path))
+
+    registry = build_model_registry(
+        config,
+        run_scoped_backends=(
+            RunScopedBackendDefinition(
+                backend_name="adhoc_blue",
+                display_name="Ad-hoc Blue",
+                endpoint="https://api.example.test/v1",
+                model="gpt-5",
+                hosting_mode="hosted",
+            ),
+        ),
+    )
+
+    try:
+        assert "adhoc_blue" in registry.backends
+        assert any(item.catalog_id == "adhoc_blue" for item in registry.catalog)
+    finally:
+        registry.close()
 
 
 def test_dry_decision_cycle_continues_other_coalition_when_one_parse_fails(tmp_path: Path) -> None:

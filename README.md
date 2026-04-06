@@ -17,7 +17,7 @@ What already works in-repo:
 - internal world state, evidence ledger, and fog-of-war fusion
 - canonical observation building with optional image attachments
 - Phase 1 action validation
-- OpenAI-compatible model adapter with primary-plus-fallback routing
+- OpenAI-compatible model adapter with model catalog, shared-default routing, and per-side fallback
 - dry and live command loops
 - operator controls, replay export, and run inspection
 - evaluation summaries, fairness review, and matrix tooling
@@ -55,8 +55,8 @@ Important defaults:
 
 - scenario: `phase1_baseline_persian_gulf`
 - SQLite DB: `.cache/dcs-dungeon-master/state.sqlite3`
-- primary model backend: `local_default`
-- fallback model backend: `hosted_default`
+- shared primary catalog entry: `local_gemma`
+- shared fallback catalog entry: `hosted_gpt5`
 - multimodal attachments: disabled globally by default
 - runtime mode: `dry`
 
@@ -68,6 +68,7 @@ cp config/milestone0.toml config/local.toml
 
 Then edit:
 
+- model catalog entries
 - model endpoints
 - enabled backends
 - `OPENAI_API_KEY` usage if you keep `hosted_default`
@@ -134,7 +135,8 @@ This reports:
 
 - backend health
 - backend capabilities
-- RED and BLUE primary/fallback routing
+- configured catalog entries
+- effective RED and BLUE primary/fallback routing
 
 ### 3.5. Web UI
 
@@ -165,6 +167,8 @@ Current Milestone 10.1 QoL improvements:
 - structured editing for zones, force placement, reserve allowed sectors, and restrictions
 - validation issues link back to the affected authored object
 - Live Ops layer toggles, manual refresh, and visibility-aware polling
+- catalog-driven run creation with one shared model for both sides by default
+- optional split REDFOR/BLUFOR routing and advanced run-scoped ad-hoc model overrides
 
 Useful direct API checks:
 
@@ -172,7 +176,15 @@ Useful direct API checks:
 curl http://127.0.0.1:8080/api/scenarios
 curl http://127.0.0.1:8080/api/runs
 curl http://127.0.0.1:8080/api/scenarios/drafts
+curl http://127.0.0.1:8080/api/model-catalog
 ```
+
+Live Ops run setup now supports:
+
+- scenario + dry/live selection
+- a shared catalog preset for both sides by default
+- optional side-specific primary/fallback overrides
+- optional advanced ad-hoc model/URL overrides for one run
 
 ### 4. Observation and fusion inspection
 

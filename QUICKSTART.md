@@ -23,6 +23,13 @@ If you want a local copy:
 cp config/milestone0.toml config/local.toml
 ```
 
+The default config now uses a model catalog:
+
+- shared primary preset: `local_gemma`
+- shared fallback preset: `hosted_gpt5`
+
+The normal workflow is one shared model for both REDFOR and BLUFOR. You can split them later in the Ops UI if you want different models or servers per side.
+
 ## 3. Smoke Test Without Live Integrations
 
 Validate the scenario:
@@ -75,6 +82,13 @@ Check model backends:
 ```bash
 uv run dcs-dungeon-master check-model-backends --config config/milestone0.toml
 ```
+
+That output now includes:
+
+- backend health
+- backend capabilities
+- configured model catalog entries
+- effective REDFOR/BLUFOR routing
 
 Run one dry decision cycle:
 
@@ -146,20 +160,31 @@ Recommended Milestone 10.1 demo sequence:
 4. Change a sector radius, move an active group, or toggle reserve allowed sectors
 5. Wait for the auto-save badge to settle on `Saved`
 6. Run `Validate` and click any returned issue to jump back to the affected object
-7. Open `Ops`, toggle layers, and use `Refresh Now` after a dry or live cycle
+7. Open `Ops`
+8. In `Run Setup`, keep `Use same model for both sides` on and pick a shared catalog preset
+9. Create a dry run
+10. Toggle layers and use `Refresh Now` after a dry or live cycle
+
+If you want asymmetric routing:
+
+1. Turn off `Use same model for both sides`
+2. Pick different REDFOR and BLUFOR catalog entries
+3. Optionally open `Advanced Ad-hoc` and enter a one-off model/URL override for a side
+4. Create the run and inspect the resolved routing from the run card
 
 If you only want to smoke-test the API, these should respond with JSON:
 
 ```bash
 curl http://127.0.0.1:8080/api/scenarios
 curl http://127.0.0.1:8080/api/runs
+curl http://127.0.0.1:8080/api/model-catalog
 ```
 
 ## Notes
 
 - Default SQLite state lives at `.cache/dcs-dungeon-master/state.sqlite3`
-- Default primary model backend is `local_default`
-- Default fallback backend is `hosted_default`
+- Default shared primary catalog preset is `local_gemma`
+- Default shared fallback catalog preset is `hosted_gpt5`
 - Multimodal is disabled globally by default
 - The Python web server will serve a simple fallback page if `frontend/dist` does not exist; use Vite dev mode for the actual React UI during development
 - Milestone 9 tooling is implemented, but true sign-off still requires a real baseline matrix run against live endpoints

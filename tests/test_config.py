@@ -20,6 +20,8 @@ def test_load_config_success() -> None:
     assert config.dcs.grpc.retry_attempts == 1
     assert config.model_routing.red_backend == "local_default"
     assert config.model_routing.blue_backend == "local_default"
+    assert config.model_catalog[0].id == "local_gemma"
+    assert config.model_routing.default_catalog_id == "local_gemma"
     assert config.fog_of_war.inference_mode.value == "conservative"
     assert config.evaluation.profile_name == "phase1_baseline"
     assert config.evaluation.review_policy is EvaluationReviewPolicy.SUSPICIOUS_ONLY
@@ -243,3 +245,82 @@ visual_attachment = true
     assert config.evaluation.profile_name == "phase1_eval"
     assert config.evaluation.decision_cadence_sec == 45
     assert config.evaluation.matrix_cases[0].visual_attachment is True
+
+
+def test_load_config_supports_shared_default_catalog_routing(tmp_path: Path) -> None:
+    config_path = tmp_path / "shared.toml"
+    config_path.write_text(
+        """
+[runtime]
+app_name = "dcs_dungeon_master"
+environment = "test"
+dry_run = true
+
+[logging]
+level = "INFO"
+format = "text"
+
+[dcs]
+remote_hosted = false
+
+[dcs.olympus]
+base_url = "http://127.0.0.1:4512"
+timeout_sec = 5.0
+
+[dcs.grpc]
+host = "127.0.0.1"
+port = 50051
+timeout_sec = 5.0
+
+[[models]]
+name = "local_default"
+hosting_mode = "local"
+endpoint = "http://127.0.0.1:1234/v1"
+model = "gemma"
+enabled = true
+
+[[models]]
+name = "hosted_default"
+hosting_mode = "hosted"
+endpoint = "https://api.example.test/v1"
+model = "gpt-5"
+enabled = true
+
+[[model_catalog]]
+id = "local_gemma"
+display_name = "Local Gemma"
+backend_name = "local_default"
+server_label = "LM Studio"
+
+[[model_catalog]]
+id = "hosted_gpt5"
+display_name = "Hosted GPT-5"
+backend_name = "hosted_default"
+server_label = "OpenAI"
+
+[model_routing]
+default_backend = "local_gemma"
+default_fallback_backend = "hosted_gpt5"
+blue_backend_override = "hosted_gpt5"
+
+[scenario]
+id = "phase1_baseline_persian_gulf"
+registry_path = "scenarios/index.toml"
+
+[persistence]
+db_path = "/tmp/dcs.sqlite3"
+enable_wal = true
+
+[dry_run]
+enabled = true
+summary_output = "text"
+""".strip(),
+        encoding="utf-8",
+    )
+
+    config = load_config(config_path)
+
+    assert config.model_routing.red_backend == "local_default"
+    assert config.model_routing.blue_backend == "hosted_default"
+    assert config.model_routing.default_catalog_id == "local_gemma"
+    assert config.model_routing.blue_catalog_override == "hosted_gpt5"

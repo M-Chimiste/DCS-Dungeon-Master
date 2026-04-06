@@ -631,6 +631,64 @@ class ModelBackendCapability:
 
 
 @dataclass(slots=True, frozen=True)
+class ModelCatalogEntry:
+    catalog_id: str
+    display_name: str
+    backend_name: str
+    server_label: str
+    endpoint: str
+    model: str
+    hosting_mode: str
+    supports_structured_output: bool
+    supports_multimodal: bool
+    enabled: bool = True
+    hidden: bool = False
+    tags: tuple[str, ...] = ()
+
+
+@dataclass(slots=True, frozen=True)
+class RunScopedBackendDefinition:
+    backend_name: str
+    display_name: str
+    endpoint: str
+    model: str
+    hosting_mode: str
+    multimodal: bool = False
+    api_key_env_var: str | None = None
+    timeout_sec: float = 30.0
+    max_retries: int = 1
+    temperature: float = 0.2
+    max_output_tokens: int | None = None
+    system_prompt_variant: str | None = None
+    source_label: str | None = None
+
+
+@dataclass(slots=True, frozen=True)
+class ResolvedCoalitionRouting:
+    coalition: Coalition
+    primary_backend_name: str
+    fallback_backend_name: str | None = None
+    primary_catalog_id: str | None = None
+    fallback_catalog_id: str | None = None
+    primary_source: str = "config"
+    fallback_source: str | None = None
+
+
+@dataclass(slots=True, frozen=True)
+class ResolvedRunRouting:
+    red: ResolvedCoalitionRouting
+    blue: ResolvedCoalitionRouting
+    shared_primary_catalog_id: str | None = None
+    shared_fallback_catalog_id: str | None = None
+    same_primary_for_both: bool = False
+    same_fallback_for_both: bool = False
+
+    @property
+    def is_symmetric(self) -> bool:
+        return self.same_primary_for_both and self.red.primary_backend_name == self.blue.primary_backend_name
+
+
+@dataclass(slots=True, frozen=True)
 class ModelInvocationAttempt:
     backend_name: str
     status: str
@@ -804,6 +862,8 @@ class RunControlState:
     config_snapshot: dict[str, Any] | None = None
     red_backend_name: str | None = None
     blue_backend_name: str | None = None
+    routing: ResolvedRunRouting | None = None
+    run_scoped_backends: tuple[RunScopedBackendDefinition, ...] = ()
     started_at: datetime | None = None
     paused_at: datetime | None = None
     resumed_at: datetime | None = None
@@ -1046,6 +1106,8 @@ class RunComparisonResult:
     modes: tuple[str, str]
     statuses: tuple[str, str]
     backend_assignments: dict[str, tuple[str | None, str | None]]
+    routing_modes: tuple[str, str]
+    symmetric_routing: tuple[bool, bool]
     decision_cycle_counts: tuple[int, int]
     latest_decision_cycles: tuple[int, int]
     cycle_classification_counts: dict[str, tuple[int, int]]

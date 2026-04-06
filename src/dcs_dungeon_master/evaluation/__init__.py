@@ -22,6 +22,7 @@ from dcs_dungeon_master.core.enums import (
     FairnessMode,
     FairnessReviewStatus,
     MatrixCaseStatus,
+    ModelHostingMode,
     RejectionCode,
     RunLifecycleStatus,
     ValidationStatus,
@@ -36,6 +37,9 @@ from dcs_dungeon_master.core.models import (
     MatrixCaseResult,
     MatrixRunReport,
     ObservationArtifact,
+    ResolvedCoalitionRouting,
+    ResolvedRunRouting,
+    RunScopedBackendDefinition,
     TuningNote,
 )
 from dcs_dungeon_master.core.versions import ACTION_SCHEMA_VERSION, OBSERVATION_SCHEMA_VERSION
@@ -55,11 +59,27 @@ def build_evaluation_metadata(
     *,
     red_backend_name: str | None = None,
     blue_backend_name: str | None = None,
+    run_scoped_backends: tuple[RunScopedBackendDefinition, ...] = (),
     decision_cadence_sec: int | None = None,
     prompt_version: str | None = None,
     notes: str | None = None,
 ) -> dict[str, Any]:
     backend_by_name = {backend.name: backend for backend in config.models}
+    for scoped_backend in run_scoped_backends:
+        backend_by_name[scoped_backend.backend_name] = ModelBackendConfig(
+            name=scoped_backend.backend_name,
+            hosting_mode=ModelHostingMode(scoped_backend.hosting_mode),
+            endpoint=scoped_backend.endpoint,
+            model=scoped_backend.model,
+            enabled=True,
+            multimodal=scoped_backend.multimodal,
+            api_key_env_var=scoped_backend.api_key_env_var,
+            timeout_sec=scoped_backend.timeout_sec,
+            max_retries=scoped_backend.max_retries,
+            temperature=scoped_backend.temperature,
+            max_output_tokens=scoped_backend.max_output_tokens,
+            system_prompt_variant=scoped_backend.system_prompt_variant,
+        )
     red_name = red_backend_name or config.model_routing.red_backend
     blue_name = blue_backend_name or config.model_routing.blue_backend
     red_backend = backend_by_name[red_name]
@@ -271,6 +291,7 @@ class EvaluationService:
                     config_snapshot=case_config.to_dict(),
                     red_backend_name=case.red_backend,
                     blue_backend_name=case.blue_backend,
+                    routing=_resolved_run_routing(case_config),
                     evaluation_metadata=evaluation_metadata,
                 )
                 try:
@@ -988,4 +1009,35 @@ def _config_for_matrix_case(config: AppConfig, case_id: str) -> AppConfig:
             red_fallback_backend=config.model_routing.red_fallback_backend,
             blue_fallback_backend=config.model_routing.blue_fallback_backend,
         ),
+    )
+
+
+def _resolved_run_routing(config: AppConfig) -> ResolvedRunRouting:
+    return ResolvedRunRouting(
+        red=ResolvedCoalitionRouting(
+            coalition=Coalition.RED,
+            primary_backend_name=config.model_routing.red_backend,
+            fallback_backend_name=config.model_routing.red_fallback_backend,
+            primary_catalog_id=config.model_routing.red_catalog_override or config.model_routing.default_catalog_id,
+            fallback_catalog_id=config.model_routing.red_fallback_catalog_override or config.model_routing.default_fallback_catalog_id,
+            primary_source="catalog" if (config.model_routing.red_catalog_override or config.model_routing.default_catalog_id) else "config",
+            fallback_source="catalog"
+            if (config.model_routing.red_fallback_catalog_override or config.model_routing.default_fallback_catalog_id)
+            else None,
+        ),
+        blue=ResolvedCoalitionRouting(
+            coalition=Coalition.BLUE,
+            primary_backend_name=config.model_routing.blue_backend,
+            fallback_backend_name=config.model_routing.blue_fallback_backend,
+            primary_catalog_id=config.model_routing.blue_catalog_override or config.model_routing.default_catalog_id,
+            fallback_catalog_id=config.model_routing.blue_fallback_catalog_override or config.model_routing.default_fallback_catalog_id,
+            primary_source="catalog" if (config.model_routing.blue_catalog_override or config.model_routing.default_catalog_id) else "config",
+            fallback_source="catalog"
+            if (config.model_routing.blue_fallback_catalog_override or config.model_routing.default_fallback_catalog_id)
+            else None,
+        ),
+        shared_primary_catalog_id=config.model_routing.default_catalog_id,
+        shared_fallback_catalog_id=config.model_routing.default_fallback_catalog_id,
+        same_primary_for_both=config.model_routing.red_backend == config.model_routing.blue_backend,
+        same_fallback_for_both=config.model_routing.red_fallback_backend == config.model_routing.blue_fallback_backend,
     )

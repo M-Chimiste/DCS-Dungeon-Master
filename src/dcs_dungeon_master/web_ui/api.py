@@ -5,13 +5,14 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, is_dataclass
 from datetime import datetime
 from enum import Enum
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
 
 from dcs_dungeon_master.app import DEFAULT_CONFIG_PATH
-from dcs_dungeon_master.core.config import load_config
-from dcs_dungeon_master.core.enums import Coalition
+from dcs_dungeon_master.core.config import AppConfig, ModelBackendConfig, load_config
+from dcs_dungeon_master.core.enums import Coalition, ModelHostingMode, RunLifecycleStatus
 from dcs_dungeon_master.core.exceptions import PersistenceError, ScenarioNotFoundError
 from dcs_dungeon_master.core.models import (
     CampaignControlPointView,
@@ -20,8 +21,13 @@ from dcs_dungeon_master.core.models import (
     CommanderPreviewSnapshot,
     LiveOpsSnapshot,
     OperatorMapLayerSet,
+    ResolvedCoalitionRouting,
+    ResolvedRunRouting,
+    RunScopedBackendDefinition,
     ScenarioDraftPatch,
 )
+from dcs_dungeon_master.evaluation import build_evaluation_metadata
+from dcs_dungeon_master.model_adapter import build_model_registry
 from dcs_dungeon_master.operator_control import OperatorControlService
 from dcs_dungeon_master.persistence import SQLiteStateStore
 from dcs_dungeon_master.scenario_state.registry import get_scenario_definition, list_scenarios, scenario_definition_to_dict
@@ -47,6 +53,7 @@ def _json_ready(value: Any) -> Any:
 
 @dataclass(slots=True)
 class WebUiService:
+    config: AppConfig
     store: SQLiteStateStore
     operator: OperatorControlService
     draft_service: ScenarioDraftService
@@ -60,7 +67,7 @@ class WebUiService:
         reference_service = PydcsReferenceService()
         draft_service = ScenarioDraftService(store, index_path=config.scenario.registry_path, reference_service=reference_service)
         operator = OperatorControlService(store)
-        return cls(store=store, operator=operator, draft_service=draft_service, registry_path=Path(config.scenario.registry_path))
+        return cls(config=config, store=store, operator=operator, draft_service=draft_service, registry_path=Path(config.scenario.registry_path))
 
     @property
     def status(self) -> str:
@@ -178,9 +185,63 @@ class WebUiService:
                     "latest_decision_cycle": latest_cycle,
                     "red_backend_name": state.red_backend_name,
                     "blue_backend_name": state.blue_backend_name,
+                    "routing": _json_ready(state.routing),
                 }
             )
         return {"runs": _json_ready(runs)}
+
+    def list_model_catalog(self) -> dict[str, Any]:
+        registry = build_model_registry(self.config)
+        try:
+            return {"catalog": _json_ready(registry.list_catalog())}
+        finally:
+            registry.close()
+
+    def create_run(self, payload: dict[str, Any]) -> dict[str, Any]:
+        scenario_id = payload.get("scenario_id") or self.config.scenario.id
+        mode = str(payload.get("mode", "dry"))
+        if mode not in {"dry", "live"}:
+            raise PersistenceError("mode must be 'dry' or 'live'.")
+        scenario = get_scenario_definition(str(scenario_id), self.registry_path)
+        routing_payload = payload.get("routing", {})
+        if routing_payload is not None and not isinstance(routing_payload, dict):
+            raise PersistenceError("routing must be an object when provided.")
+        routing, run_scoped_backends = self._resolve_run_routing(routing_payload or {})
+        run_id = self.store.create_run_from_scenario(
+            scenario,
+            mode=mode,
+            config_digest=hashlib.sha256(json.dumps(self.config.to_dict(), sort_keys=True).encode("utf-8")).hexdigest(),
+            config_snapshot=self.config.to_dict(),
+            red_backend_name=routing.red.primary_backend_name,
+            blue_backend_name=routing.blue.primary_backend_name,
+            routing=routing,
+            run_scoped_backends=run_scoped_backends,
+            evaluation_metadata=build_evaluation_metadata(
+                self.config,
+                red_backend_name=routing.red.primary_backend_name,
+                blue_backend_name=routing.blue.primary_backend_name,
+                run_scoped_backends=run_scoped_backends,
+            ),
+        )
+        return {"run": _json_ready(self.store.get_run_control_state(run_id))}
+
+    def get_run_routing(self, run_id: str) -> dict[str, Any]:
+        run = self.store.get_run_control_state(run_id)
+        return {
+            "routing": _json_ready(run.routing),
+            "run_scoped_backends": _json_ready(run.run_scoped_backends),
+        }
+
+    def update_run_routing(self, run_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        run = self.store.get_run_control_state(run_id)
+        if run.status is not RunLifecycleStatus.CREATED:
+            raise PersistenceError("Run routing can only be updated while the run is still created.")
+        routing_payload = payload.get("routing", payload)
+        if not isinstance(routing_payload, dict):
+            raise PersistenceError("routing must be an object.")
+        routing, run_scoped_backends = self._resolve_run_routing(routing_payload)
+        updated = self.store.update_run_routing(run_id, routing, run_scoped_backends=run_scoped_backends)
+        return {"run": _json_ready(updated)}
 
     def get_run_status(self, run_id: str) -> dict[str, Any]:
         return {"run": _json_ready(self.operator.get_status(run_id))}
@@ -257,6 +318,142 @@ class WebUiService:
     def get_model_invocations(self, run_id: str) -> dict[str, Any]:
         return {"model_invocations": _json_ready(self.store.list_model_invocations(run_id))}
 
+    def _resolve_run_routing(
+        self,
+        payload: dict[str, Any],
+    ) -> tuple[ResolvedRunRouting, tuple[RunScopedBackendDefinition, ...]]:
+        backend_by_name = {backend.name: backend for backend in self.config.models}
+        catalog_by_id = {entry.id: entry for entry in self.config.model_catalog if entry.enabled}
+        scoped_backends: list[RunScopedBackendDefinition] = []
+
+        def make_scoped_backend(field_name: str, raw: dict[str, Any]) -> RunScopedBackendDefinition:
+            display_name = raw.get("display_name") or raw.get("model") or field_name
+            endpoint = raw.get("endpoint")
+            model = raw.get("model")
+            hosting_mode = raw.get("hosting_mode", "hosted")
+            if not isinstance(endpoint, str) or not endpoint.strip():
+                raise PersistenceError(f"{field_name}.endpoint is required for an ad-hoc backend override.")
+            if not isinstance(model, str) or not model.strip():
+                raise PersistenceError(f"{field_name}.model is required for an ad-hoc backend override.")
+            try:
+                ModelHostingMode(str(hosting_mode))
+            except ValueError as exc:
+                raise PersistenceError(f"{field_name}.hosting_mode must be one of: local, lan, hosted.") from exc
+            backend_name = f"adhoc_{field_name}_{len(scoped_backends) + 1}"
+            scoped = RunScopedBackendDefinition(
+                backend_name=backend_name,
+                display_name=str(display_name),
+                endpoint=endpoint.strip(),
+                model=model.strip(),
+                hosting_mode=str(hosting_mode),
+                multimodal=bool(raw.get("multimodal", False)),
+                api_key_env_var=raw.get("api_key_env_var"),
+                timeout_sec=float(raw.get("timeout_sec", 30.0)),
+                max_retries=int(raw.get("max_retries", 1)),
+                temperature=float(raw.get("temperature", 0.2)),
+                max_output_tokens=raw.get("max_output_tokens"),
+                system_prompt_variant=raw.get("system_prompt_variant"),
+                source_label=str(raw.get("source_label", "ad-hoc")),
+            )
+            scoped_backends.append(scoped)
+            return scoped
+
+        def resolve_selector(
+            field_name: str,
+            selector: Any,
+            adhoc: Any,
+            *,
+            default: tuple[str | None, str | None, str | None],
+            required: bool = True,
+        ) -> tuple[str | None, str | None, str | None]:
+            if isinstance(adhoc, dict) and adhoc:
+                scoped = make_scoped_backend(field_name, adhoc)
+                return (scoped.backend_name, scoped.backend_name, "ad_hoc")
+            if isinstance(selector, str) and selector.strip():
+                value = selector.strip()
+                if value in catalog_by_id:
+                    entry = catalog_by_id[value]
+                    return (entry.backend_name, value, "catalog")
+                if value in backend_by_name and backend_by_name[value].enabled:
+                    return (value, None, "config_backend")
+                raise PersistenceError(f"{field_name} references unknown catalog entry or backend '{value}'.")
+            if default[0] is None and required:
+                raise PersistenceError(f"{field_name} is required.")
+            return (default[0], default[1], default[2] or "default")
+
+        same_for_both = bool(payload.get("same_for_both", True))
+        shared_primary = payload.get("shared_primary_catalog_id") or payload.get("default_catalog_id")
+        shared_fallback = payload.get("shared_fallback_catalog_id")
+        shared_primary_adhoc = payload.get("shared_primary_adhoc")
+        shared_fallback_adhoc = payload.get("shared_fallback_adhoc")
+        red_primary_selector = payload.get("red_primary_catalog_id")
+        blue_primary_selector = payload.get("blue_primary_catalog_id")
+        red_fallback_selector = payload.get("red_fallback_catalog_id")
+        blue_fallback_selector = payload.get("blue_fallback_catalog_id")
+
+        default_primary = resolve_selector(
+            "shared_primary",
+            shared_primary,
+            shared_primary_adhoc,
+            default=(self.config.model_routing.red_backend, self.config.model_routing.default_catalog_id, "config"),
+        )
+        default_fallback = resolve_selector(
+            "shared_fallback",
+            shared_fallback,
+            shared_fallback_adhoc,
+            default=(self.config.model_routing.red_fallback_backend, self.config.model_routing.default_fallback_catalog_id, "config"),
+            required=False,
+        ) if shared_fallback or shared_fallback_adhoc or self.config.model_routing.red_fallback_backend else (None, None, None)
+
+        if same_for_both:
+            red_primary = default_primary
+            blue_primary = default_primary
+            red_fallback = default_fallback
+            blue_fallback = default_fallback
+        else:
+            red_primary = resolve_selector("red_primary", red_primary_selector, payload.get("red_primary_adhoc"), default=default_primary)
+            blue_primary = resolve_selector("blue_primary", blue_primary_selector, payload.get("blue_primary_adhoc"), default=default_primary)
+            red_fallback = resolve_selector(
+                "red_fallback",
+                red_fallback_selector,
+                payload.get("red_fallback_adhoc"),
+                default=default_fallback,
+                required=False,
+            )
+            blue_fallback = resolve_selector(
+                "blue_fallback",
+                blue_fallback_selector,
+                payload.get("blue_fallback_adhoc"),
+                default=default_fallback,
+                required=False,
+            )
+
+        routing = ResolvedRunRouting(
+            red=ResolvedCoalitionRouting(
+                coalition=Coalition.RED,
+                primary_backend_name=red_primary[0],
+                fallback_backend_name=red_fallback[0] if red_fallback[0] else None,
+                primary_catalog_id=red_primary[1],
+                fallback_catalog_id=red_fallback[1] if red_fallback[1] else None,
+                primary_source=red_primary[2],
+                fallback_source=red_fallback[2] if red_fallback[0] else None,
+            ),
+            blue=ResolvedCoalitionRouting(
+                coalition=Coalition.BLUE,
+                primary_backend_name=blue_primary[0],
+                fallback_backend_name=blue_fallback[0] if blue_fallback[0] else None,
+                primary_catalog_id=blue_primary[1],
+                fallback_catalog_id=blue_fallback[1] if blue_fallback[1] else None,
+                primary_source=blue_primary[2],
+                fallback_source=blue_fallback[2] if blue_fallback[0] else None,
+            ),
+            shared_primary_catalog_id=default_primary[1],
+            shared_fallback_catalog_id=default_fallback[1] if default_fallback[0] else None,
+            same_primary_for_both=red_primary[0] == blue_primary[0],
+            same_fallback_for_both=(red_fallback[0] or None) == (blue_fallback[0] or None),
+        )
+        return (routing, tuple(scoped_backends))
+
     def dispatch(self, method: str, path: str, body: dict[str, Any] | None = None) -> tuple[int, dict[str, Any]]:
         body = body or {}
         segments = [segment for segment in path.strip("/").split("/") if segment]
@@ -293,11 +490,19 @@ class WebUiService:
                 return (200, self.get_theater_reference(segments[2]))
             if method == "GET" and segments == ["api", "runs"]:
                 return (200, self.list_runs())
+            if method == "POST" and segments == ["api", "runs"]:
+                return (200, self.create_run(body))
+            if method == "GET" and segments == ["api", "model-catalog"]:
+                return (200, self.list_model_catalog())
             if len(segments) >= 4 and segments[1] == "runs":
                 run_id = segments[2]
                 tail = segments[3:]
                 if method == "GET" and tail == ["status"]:
                     return (200, self.get_run_status(run_id))
+                if method == "GET" and tail == ["routing"]:
+                    return (200, self.get_run_routing(run_id))
+                if method == "PATCH" and tail == ["routing"]:
+                    return (200, self.update_run_routing(run_id, body))
                 if method == "POST" and tail in (["start"], ["pause"], ["resume"], ["stop"]):
                     return (200, self.transition_run(run_id, tail[0]))
                 if method == "GET" and tail == ["summary"]:
