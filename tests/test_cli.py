@@ -9,6 +9,7 @@ import httpx
 
 from dcs_dungeon_master.__main__ import main
 from dcs_dungeon_master.core.config import load_config
+from dcs_dungeon_master.core.enums import RunLifecycleStatus
 from dcs_dungeon_master.evaluation import EvaluationService
 from dcs_dungeon_master.integration.types import GrpcStreamEnvelope
 from dcs_dungeon_master.model_adapter import build_model_registry
@@ -743,3 +744,48 @@ def test_model_backend_and_decision_cycle_cli_smoke(tmp_path: Path, capsys, monk
     assert any(check["milestone"] == "Milestone 7" and check["passed"] is True for check in audit_payload["checks"])
     assert any(check["milestone"] == "Milestone 8" and check["passed"] is True for check in audit_payload["checks"])
     assert any(check["milestone"] == "Milestone 9" for check in audit_payload["checks"])
+
+
+def test_run_decision_cycle_cli_marks_run_failed_on_runtime_exception(tmp_path: Path, capsys, monkeypatch) -> None:
+    config_path = _write_temp_config(tmp_path)
+    db_path = tmp_path / "state.sqlite3"
+    scenario = get_scenario_definition("phase1_baseline_persian_gulf", "scenarios/index.toml")
+    store = SQLiteStateStore(db_path)
+    run_id = store.create_run_from_scenario(scenario)
+
+    monkeypatch.setattr(
+        "dcs_dungeon_master.__main__.build_integration_services",
+        lambda config: type(
+            "FakeIntegrations",
+            (),
+            {
+                "olympus": object(),
+                "dcs_grpc": object(),
+                "close": staticmethod(lambda: None),
+            },
+        )(),
+    )
+    monkeypatch.setattr(
+        "dcs_dungeon_master.__main__.DryDecisionLoopRunner.run_decision_cycle",
+        lambda self, *args, **kwargs: (_ for _ in ()).throw(RuntimeError("synthetic loop crash")),
+    )
+
+    exit_code = main(
+        [
+            "run-decision-cycle",
+            "--config",
+            str(config_path),
+            "--run-id",
+            run_id,
+            "--decision-cycle",
+            "1",
+        ]
+    )
+    payload = json.loads(capsys.readouterr().out)
+    final_state = store.get_run_control_state(run_id)
+
+    assert exit_code == 1
+    assert payload["status"] == "failed"
+    assert "synthetic loop crash" in payload["error"]
+    assert final_state.status is RunLifecycleStatus.FAILED
+    assert final_state.terminal_reason == "synthetic loop crash"

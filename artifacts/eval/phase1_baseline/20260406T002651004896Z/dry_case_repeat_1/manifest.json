@@ -1,0 +1,65 @@
+{
+  "bundle_version": "phase1_run_bundle_v1",
+  "comparison_metadata": {
+    "blue_backend_name": "local_default",
+    "cycle_classification_counts": {},
+    "decision_cycle_count": 0,
+    "execution_status_counts": {},
+    "export_manifest_version": "phase1_run_bundle_v1",
+    "latest_decision_cycle": 0,
+    "mode": "dry",
+    "model_status_counts": {},
+    "red_backend_name": "local_default",
+    "routing": {
+      "blue": {
+        "coalition": "blue",
+        "fallback_backend_name": "hosted_default",
+        "fallback_catalog_id": null,
+        "fallback_source": null,
+        "primary_backend_name": "local_default",
+        "primary_catalog_id": null,
+        "primary_source": "config"
+      },
+      "red": {
+        "coalition": "red",
+        "fallback_backend_name": "hosted_default",
+        "fallback_catalog_id": null,
+        "fallback_source": null,
+        "primary_backend_name": "local_default",
+        "primary_catalog_id": null,
+        "primary_source": "config"
+      },
+      "same_fallback_for_both": true,
+      "same_primary_for_both": true,
+      "shared_fallback_catalog_id": null,
+      "shared_primary_catalog_id": null
+    },
+    "scenario_id": "phase1_baseline_persian_gulf",
+    "status": "created"
+  },
+  "exported_at": "2026-04-06T00:26:51.010302+00:00",
+  "file_inventory": [
+    "run.json",
+    "scenario.json",
+    "run_summary.json",
+    "coalition_inspection_red.json",
+    "coalition_inspection_blue.json",
+    "world_state.json",
+    "fusion_red.json",
+    "fusion_blue.json",
+    "standing_orders.json",
+    "standing_order_history.jsonl",
+    "decision_timeline.jsonl",
+    "observations.jsonl",
+    "model_invocations.jsonl",
+    "action_validation_batches.jsonl",
+    "execution_batches.jsonl",
+    "events.jsonl",
+    "manifest.json",
+    "evaluation_summary.json",
+    "cycle_evaluations.jsonl",
+    "fairness_findings.jsonl"
+  ],
+  "run_id": "2a7bd5cffc6a4952bd9215b84fa09f38",
+  "scenario_id": "phase1_baseline_persian_gulf"
+}

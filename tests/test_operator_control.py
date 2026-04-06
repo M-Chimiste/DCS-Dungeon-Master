@@ -8,11 +8,12 @@ import pytest
 
 from dcs_dungeon_master.action_validation import ActionValidator
 from dcs_dungeon_master.core.config import load_config
-from dcs_dungeon_master.core.enums import RunLifecycleStatus
+from dcs_dungeon_master.core.enums import Coalition, RunLifecycleStatus
 from dcs_dungeon_master.evaluation import EvaluationService, build_evaluation_metadata
 from dcs_dungeon_master.core.exceptions import PersistenceError
 from dcs_dungeon_master.execution import ExecutionEngine, LiveCommandLoopRunner
 from dcs_dungeon_master.integration.olympus import OlympusClient
+from dcs_dungeon_master.core.models import ResolvedCoalitionRouting, ResolvedRunRouting
 from dcs_dungeon_master.model_adapter import build_model_registry
 from dcs_dungeon_master.observation import ObservationBuilder
 from dcs_dungeon_master.operator_control import OperatorControlService
@@ -191,3 +192,82 @@ def test_replay_export_requires_empty_directory(tmp_path: Path) -> None:
 
     with pytest.raises(PersistenceError):
         operator.export_replay_bundle(run_id, export_dir)
+
+
+def test_operator_compare_and_replay_manifest_include_routing_metadata(tmp_path: Path) -> None:
+    config, scenario, store, run_id, _, operator = _seed_services(tmp_path)
+    symmetric_routing = ResolvedRunRouting(
+        red=ResolvedCoalitionRouting(
+            coalition=Coalition.RED,
+            primary_backend_name="local_default",
+            fallback_backend_name=None,
+            primary_catalog_id="local_default",
+            fallback_catalog_id=None,
+            primary_source="catalog",
+            fallback_source=None,
+        ),
+        blue=ResolvedCoalitionRouting(
+            coalition=Coalition.BLUE,
+            primary_backend_name="local_default",
+            fallback_backend_name=None,
+            primary_catalog_id="local_default",
+            fallback_catalog_id=None,
+            primary_source="catalog",
+            fallback_source=None,
+        ),
+        shared_primary_catalog_id="local_default",
+        shared_fallback_catalog_id=None,
+        same_primary_for_both=True,
+        same_fallback_for_both=True,
+    )
+    store.update_run_routing(run_id, symmetric_routing)
+    routing = ResolvedRunRouting(
+        red=ResolvedCoalitionRouting(
+            coalition=Coalition.RED,
+            primary_backend_name="local_default",
+            fallback_backend_name="local_default",
+            primary_catalog_id="local_default",
+            fallback_catalog_id="local_default",
+            primary_source="catalog",
+            fallback_source="catalog",
+        ),
+        blue=ResolvedCoalitionRouting(
+            coalition=Coalition.BLUE,
+            primary_backend_name="blue_override",
+            fallback_backend_name=None,
+            primary_catalog_id="blue_override",
+            fallback_catalog_id=None,
+            primary_source="catalog",
+            fallback_source=None,
+        ),
+        shared_primary_catalog_id="local_default",
+        shared_fallback_catalog_id="local_default",
+        same_primary_for_both=False,
+        same_fallback_for_both=False,
+    )
+    other_run_id = store.create_run_from_scenario(
+        scenario,
+        mode="dry",
+        config_digest="other-digest",
+        config_snapshot=config.to_dict(),
+        red_backend_name=routing.red.primary_backend_name,
+        blue_backend_name=routing.blue.primary_backend_name,
+        routing=routing,
+        evaluation_metadata=build_evaluation_metadata(
+            config,
+            red_backend_name=routing.red.primary_backend_name,
+            blue_backend_name=config.model_routing.blue_backend,
+        ),
+    )
+    store.update_run_routing(other_run_id, routing)
+
+    comparison = operator.compare_runs(run_id, other_run_id)
+    export_dir = tmp_path / "routing-bundle"
+    operator.export_replay_bundle(other_run_id, export_dir)
+    manifest = json.loads((export_dir / "manifest.json").read_text(encoding="utf-8"))
+
+    assert comparison.routing_modes == ("symmetric", "asymmetric")
+    assert comparison.symmetric_routing == (True, False)
+    assert comparison.backend_assignments["blue_primary_catalog_id"][1] == "blue_override"
+    assert manifest["comparison_metadata"]["routing"]["blue"]["primary_backend_name"] == "blue_override"
+    assert manifest["comparison_metadata"]["routing"]["red"]["primary_catalog_id"] == "local_default"
