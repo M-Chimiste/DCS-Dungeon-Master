@@ -657,6 +657,9 @@ export function StudioPage() {
           sectors={sectors}
           controlPoints={controlPoints}
           zones={zones}
+          basemap={reference?.basemap}
+          landmarks={reference?.landmarks ?? []}
+          terrainSummary={reference?.terrain_summary ?? []}
           title={currentScenario?.name ?? "Scenario"}
           selectedSectorId={selectedSectorId}
           selectedControlPointId={selectedControlPointId}
@@ -702,6 +705,7 @@ export function StudioPage() {
             <div className="summary-grid">
               <SummaryCard title="Status" value={reference.reference_status} detail={reference.message} />
               <SummaryCard title="Airports" value={reference.airports?.length ?? 0} />
+              <SummaryCard title="Landmarks" value={reference.landmarks?.length ?? 0} />
               <SummaryCard title="Theater" value={reference.theater_id} />
             </div>
           </div>

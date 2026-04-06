@@ -36,6 +36,11 @@ class ActionType(StrEnum):
     SET_GROUP_POSTURE = "set_group_posture"
     REINFORCE_CONTROL_POINT = "reinforce_control_point"
     WITHDRAW_GROUP = "withdraw_group"
+    LAUNCH_AIR_PACKAGE = "launch_air_package"
+    RETASK_AIR_PACKAGE = "retask_air_package"
+    ABORT_AIR_PACKAGE = "abort_air_package"
+    SET_AIR_PACKAGE_POSTURE = "set_air_package_posture"
+    SET_AIR_PACKAGE_ROE = "set_air_package_roe"
     HOLD_ACTION = "hold_action"
 
 

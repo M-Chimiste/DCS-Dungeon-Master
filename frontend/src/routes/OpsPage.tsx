@@ -161,6 +161,10 @@ export function OpsPage() {
   const visibleControlPoints = layers.controlPoints ? ops?.operator_map_layers?.control_points ?? [] : [];
   const visibleSectors = layers.sectors ? ops?.operator_map_layers?.sectors ?? [] : [];
   const visibleWorldGroups = layers.worldTruth ? ops?.operator_map_layers?.world_groups ?? [] : [];
+  const visibleAirPackages = ops?.operator_map_layers?.air_packages ?? [];
+  const visibleLandmarks = ops?.operator_map_layers?.landmarks ?? [];
+  const visibleTerrain = ops?.operator_map_layers?.terrain_summary ?? [];
+  const visibleBasemap = ops?.operator_map_layers?.basemap ?? null;
 
   const latestRed = ops?.red_inspection?.latest_model_invocation;
   const latestBlue = ops?.blue_inspection?.latest_model_invocation;
@@ -443,6 +447,10 @@ export function OpsPage() {
           controlPoints={visibleControlPoints}
           tracks={visibleTracks}
           worldGroups={visibleWorldGroups}
+          airPackages={visibleAirPackages}
+          landmarks={visibleLandmarks}
+          terrainSummary={visibleTerrain}
+          basemap={visibleBasemap}
         />
         <div className="summary-grid">
           <SummaryCard title="Cycle" value={ops?.summary?.latest_decision_cycle ?? 0} />
@@ -461,6 +469,13 @@ export function OpsPage() {
               <SummaryCard title="Friendlies" value={redPreview?.observation?.friendly_forces?.length ?? 0} />
               <SummaryCard title="Changes" value={redPreview?.observation?.recent_changes?.length ?? 0} />
             </div>
+            {redPreview?.map_image_uris?.length ? (
+              <div className="preview-image-grid">
+                {redPreview.map_image_uris.slice(0, 3).map((uri: string) => (
+                  <img key={uri} src={uri} alt="REDFOR map context" />
+                ))}
+              </div>
+            ) : null}
           </section>
           <section className="panel preview-panel">
             <h3>BLUFOR Commander Preview</h3>
@@ -470,6 +485,13 @@ export function OpsPage() {
               <SummaryCard title="Friendlies" value={bluePreview?.observation?.friendly_forces?.length ?? 0} />
               <SummaryCard title="Changes" value={bluePreview?.observation?.recent_changes?.length ?? 0} />
             </div>
+            {bluePreview?.map_image_uris?.length ? (
+              <div className="preview-image-grid">
+                {bluePreview.map_image_uris.slice(0, 3).map((uri: string) => (
+                  <img key={uri} src={uri} alt="BLUFOR map context" />
+                ))}
+              </div>
+            ) : null}
           </section>
         </div>
       </section>

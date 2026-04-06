@@ -132,6 +132,10 @@ Each observation must contain:
 - `sector_summary`
 - `friendly_forces`
 - `enemy_contacts`
+- `air_packages`
+- `map_context`
+- `terrain_summary`
+- `landmarks`
 - `recent_changes`
 - `standing_orders`
 - `requests_for_decision`
@@ -218,6 +222,31 @@ Each friendly force entry should include:
 
 - Force identifier
 - Force type
+- Current altitude, heading, and speed when the asset is air-capable and the data is known
+
+### `air_packages`
+
+Describes active coalition-controlled air packages when Air Ops v1 is enabled.
+
+Typical contents:
+
+- Package identifier
+- Package type
+- Aircraft type and count
+- Origin control point
+- Current posture and ROE
+- Requested and normalized route legs with `altitude_ft_msl`
+
+### `map_context`, `terrain_summary`, and `landmarks`
+
+These sections extend the structured map picture without replacing the canonical structured observation.
+
+Typical contents:
+
+- Local basemap descriptor and theater bounds
+- Recommended coalition-safe image attachments
+- Sector terrain summaries and coast or water context
+- Named landmarks such as mountains, islands, or chokepoints
 - Approximate location or assigned sector
 - Readiness or health
 - Current task or posture
@@ -292,6 +321,8 @@ Instead, the map must be represented through structured abstractions:
 
 For Phase 1, sectors are the default map abstraction.
 
+Air Ops v1 may additionally provide a coalition-filtered local basemap, landmark set, and terrain summary so the commander can reason about mountains, coastlines, and major geographic constraints while still relying on structured state as the source of truth.
+
 Each sector should have:
 
 - Stable ID
@@ -313,6 +344,12 @@ This path is intended to help with:
 - Operator review and debugging of commander choices
 
 This path must not become the only way the commander understands the world in Phase 1.
+
+When enabled, the preferred image set is:
+
+- One full-theater coalition-safe map image
+- One front-area or active-package area-of-interest crop
+- The existing abstract overlay as a debug or fallback layer
 
 ### Multimodal Rules
 

@@ -33,6 +33,9 @@ from dcs_dungeon_master.core.models import (
     ActiveGroupState,
     ActionValidationBatch,
     ActionValidationResult,
+    AirPackageInventoryState,
+    AirPackageState,
+    AirRouteLeg,
     CoalitionContactTrack,
     CoalitionKnowledgeState,
     CoalitionState,
@@ -227,6 +230,41 @@ class SQLiteStateStore:
                     attrition_count INTEGER NOT NULL,
                     replacement_pool INTEGER NOT NULL,
                     PRIMARY KEY (run_id, reserve_group_id)
+                );
+
+                CREATE TABLE IF NOT EXISTS air_package_inventories (
+                    run_id TEXT NOT NULL,
+                    inventory_id TEXT NOT NULL,
+                    coalition TEXT NOT NULL,
+                    origin_control_point_id TEXT NOT NULL,
+                    aircraft_type TEXT NOT NULL,
+                    aircraft_category TEXT NOT NULL,
+                    available_count INTEGER NOT NULL,
+                    package_types_json TEXT NOT NULL,
+                    default_altitude_ft_msl INTEGER,
+                    PRIMARY KEY (run_id, inventory_id)
+                );
+
+                CREATE TABLE IF NOT EXISTS air_packages (
+                    run_id TEXT NOT NULL,
+                    package_id TEXT NOT NULL,
+                    coalition TEXT NOT NULL,
+                    package_type TEXT NOT NULL,
+                    aircraft_type TEXT NOT NULL,
+                    aircraft_category TEXT NOT NULL,
+                    aircraft_count INTEGER NOT NULL,
+                    origin_control_point_id TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    posture TEXT NOT NULL,
+                    roe TEXT NOT NULL,
+                    target_reference_type TEXT,
+                    target_reference_id TEXT,
+                    route_legs_json TEXT NOT NULL,
+                    normalized_route_legs_json TEXT NOT NULL,
+                    current_sector_id TEXT,
+                    last_updated_at TEXT,
+                    metadata_json TEXT NOT NULL,
+                    PRIMARY KEY (run_id, package_id)
                 );
 
                 CREATE TABLE IF NOT EXISTS deployment_restrictions (
@@ -836,6 +874,20 @@ class SQLiteStateStore:
                         payload=asdict(reserve),
                     ),
                 )
+            for inventory in scenario.air_package_inventories:
+                self._upsert_air_package_inventory(connection, run_id, inventory)
+                self.append_event(
+                    connection,
+                    EventRecord(
+                        id=None,
+                        run_id=run_id,
+                        event_type="air_package_inventory_initialized",
+                        entity_type="air_package_inventory",
+                        entity_id=inventory.id,
+                        occurred_at=created_at,
+                        payload=asdict(inventory),
+                    ),
+                )
             for restriction in scenario.deployment_restrictions:
                 self._insert_restriction(connection, run_id, restriction)
                 self.append_event(
@@ -1337,6 +1389,59 @@ class SQLiteStateStore:
             )
             for row in rows
         )
+
+    def get_air_package_inventories(
+        self,
+        run_id: str,
+        coalition: Coalition | None = None,
+    ) -> tuple[AirPackageInventoryState, ...]:
+        query = """
+            SELECT inventory_id, coalition, origin_control_point_id, aircraft_type, aircraft_category,
+                   available_count, package_types_json, default_altitude_ft_msl
+            FROM air_package_inventories
+            WHERE run_id = ?
+        """
+        params: tuple[object, ...] = (run_id,)
+        if coalition is not None:
+            query += " AND coalition = ?"
+            params = (run_id, coalition.value)
+        query += " ORDER BY inventory_id"
+        with self._connect() as connection:
+            rows = connection.execute(query, params).fetchall()
+        return tuple(
+            AirPackageInventoryState(
+                id=row["inventory_id"],
+                coalition=Coalition(row["coalition"]),
+                origin_control_point_id=row["origin_control_point_id"],
+                aircraft_type=row["aircraft_type"],
+                aircraft_category=row["aircraft_category"],
+                available_count=row["available_count"],
+                package_types=tuple(json.loads(row["package_types_json"])),
+                default_altitude_ft_msl=row["default_altitude_ft_msl"],
+            )
+            for row in rows
+        )
+
+    def list_air_packages(
+        self,
+        run_id: str,
+        coalition: Coalition | None = None,
+    ) -> tuple[AirPackageState, ...]:
+        query = """
+            SELECT package_id, coalition, package_type, aircraft_type, aircraft_category, aircraft_count,
+                   origin_control_point_id, status, posture, roe, target_reference_type, target_reference_id,
+                   route_legs_json, normalized_route_legs_json, current_sector_id, last_updated_at, metadata_json
+            FROM air_packages
+            WHERE run_id = ?
+        """
+        params: tuple[object, ...] = (run_id,)
+        if coalition is not None:
+            query += " AND coalition = ?"
+            params = (run_id, coalition.value)
+        query += " ORDER BY package_id"
+        with self._connect() as connection:
+            rows = connection.execute(query, params).fetchall()
+        return tuple(self._row_to_air_package(row) for row in rows)
 
     def save_observation_artifact(self, artifact: ObservationArtifact) -> int:
         payload_json = _json(asdict(artifact.observation))
@@ -2217,6 +2322,32 @@ class SQLiteStateStore:
                     ),
                 )
 
+            for inventory_update in state_updates.get("air_package_inventories", ()):
+                current = next(
+                    (
+                        item
+                        for item in self.get_air_package_inventories(run_id)
+                        if item.id == inventory_update["inventory_id"]
+                    ),
+                    None,
+                )
+                if current is None:
+                    continue
+                self._upsert_air_package_inventory(
+                    connection,
+                    run_id,
+                    AirPackageInventoryState(
+                        id=current.id,
+                        coalition=current.coalition,
+                        origin_control_point_id=current.origin_control_point_id,
+                        aircraft_type=current.aircraft_type,
+                        aircraft_category=current.aircraft_category,
+                        available_count=int(inventory_update.get("available_count", current.available_count)),
+                        package_types=current.package_types,
+                        default_altitude_ft_msl=current.default_altitude_ft_msl,
+                    ),
+                )
+
             for group_update in state_updates.get("active_groups", ()):
                 self._upsert_active_group_state(connection, run_id, ActiveGroupState(**group_update))
 
@@ -2225,6 +2356,20 @@ class SQLiteStateStore:
                 if payload.get("coalition") is not None and not isinstance(payload["coalition"], Coalition):
                     payload["coalition"] = Coalition(payload["coalition"])
                 self._upsert_world_group(connection, run_id, WorldGroupState(**payload))
+
+            for air_package_update in state_updates.get("air_packages", ()):
+                payload = dict(air_package_update)
+                if not isinstance(payload.get("coalition"), Coalition):
+                    payload["coalition"] = Coalition(payload["coalition"])
+                payload["route_legs"] = tuple(
+                    AirRouteLeg(**leg) if isinstance(leg, dict) else leg for leg in payload.get("route_legs", ())
+                )
+                payload["normalized_route_legs"] = tuple(
+                    AirRouteLeg(**leg) if isinstance(leg, dict) else leg for leg in payload.get("normalized_route_legs", ())
+                )
+                if isinstance(payload.get("last_updated_at"), str):
+                    payload["last_updated_at"] = _parse_dt(payload["last_updated_at"])
+                self._upsert_air_package(connection, run_id, AirPackageState(**payload))
 
             for standing_order in standing_orders:
                 self._upsert_execution_standing_order(connection, standing_order)
@@ -2236,6 +2381,9 @@ class SQLiteStateStore:
             for order in standing_orders:
                 if order.entity_id:
                     note_targets.add((order.entity_type, order.entity_id))
+            for air_package_update in state_updates.get("air_packages", ()):
+                if air_package_update.get("package_id"):
+                    note_targets.add(("air_package", air_package_update["package_id"]))
             for entity_type, entity_id in sorted(note_targets):
                 connection.execute(
                     """
@@ -3094,6 +3242,88 @@ class SQLiteStateStore:
             ),
         )
 
+    def _upsert_air_package_inventory(
+        self,
+        connection: sqlite3.Connection,
+        run_id: str,
+        inventory: AirPackageInventoryState,
+    ) -> None:
+        connection.execute(
+            """
+            INSERT INTO air_package_inventories (
+                run_id, inventory_id, coalition, origin_control_point_id, aircraft_type, aircraft_category,
+                available_count, package_types_json, default_altitude_ft_msl
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(run_id, inventory_id) DO UPDATE SET
+                coalition = excluded.coalition,
+                origin_control_point_id = excluded.origin_control_point_id,
+                aircraft_type = excluded.aircraft_type,
+                aircraft_category = excluded.aircraft_category,
+                available_count = excluded.available_count,
+                package_types_json = excluded.package_types_json,
+                default_altitude_ft_msl = excluded.default_altitude_ft_msl
+            """,
+            (
+                run_id,
+                inventory.id,
+                inventory.coalition.value,
+                inventory.origin_control_point_id,
+                inventory.aircraft_type,
+                inventory.aircraft_category,
+                inventory.available_count,
+                _json(inventory.package_types),
+                inventory.default_altitude_ft_msl,
+            ),
+        )
+
+    def _upsert_air_package(self, connection: sqlite3.Connection, run_id: str, package: AirPackageState) -> None:
+        connection.execute(
+            """
+            INSERT INTO air_packages (
+                run_id, package_id, coalition, package_type, aircraft_type, aircraft_category, aircraft_count,
+                origin_control_point_id, status, posture, roe, target_reference_type, target_reference_id,
+                route_legs_json, normalized_route_legs_json, current_sector_id, last_updated_at, metadata_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(run_id, package_id) DO UPDATE SET
+                coalition = excluded.coalition,
+                package_type = excluded.package_type,
+                aircraft_type = excluded.aircraft_type,
+                aircraft_category = excluded.aircraft_category,
+                aircraft_count = excluded.aircraft_count,
+                origin_control_point_id = excluded.origin_control_point_id,
+                status = excluded.status,
+                posture = excluded.posture,
+                roe = excluded.roe,
+                target_reference_type = excluded.target_reference_type,
+                target_reference_id = excluded.target_reference_id,
+                route_legs_json = excluded.route_legs_json,
+                normalized_route_legs_json = excluded.normalized_route_legs_json,
+                current_sector_id = excluded.current_sector_id,
+                last_updated_at = excluded.last_updated_at,
+                metadata_json = excluded.metadata_json
+            """,
+            (
+                run_id,
+                package.package_id,
+                package.coalition.value,
+                package.package_type,
+                package.aircraft_type,
+                package.aircraft_category,
+                package.aircraft_count,
+                package.origin_control_point_id,
+                package.status,
+                package.posture,
+                package.roe,
+                package.target_reference_type,
+                package.target_reference_id,
+                _json([asdict(leg) for leg in package.route_legs]),
+                _json([asdict(leg) for leg in package.normalized_route_legs]),
+                package.current_sector_id,
+                package.last_updated_at.isoformat() if package.last_updated_at else None,
+                _json(package.metadata),
+            ),
+        )
+
     def _upsert_world_control_point(
         self,
         connection: sqlite3.Connection,
@@ -3215,6 +3445,27 @@ class SQLiteStateStore:
             mobile=bool(row["mobile"]),
         )
 
+    def _row_to_air_package(self, row: sqlite3.Row) -> AirPackageState:
+        return AirPackageState(
+            package_id=row["package_id"],
+            coalition=Coalition(row["coalition"]),
+            package_type=row["package_type"],
+            aircraft_type=row["aircraft_type"],
+            aircraft_category=row["aircraft_category"],
+            aircraft_count=row["aircraft_count"],
+            origin_control_point_id=row["origin_control_point_id"],
+            status=row["status"],
+            posture=row["posture"],
+            roe=row["roe"],
+            target_reference_type=row["target_reference_type"],
+            target_reference_id=row["target_reference_id"],
+            route_legs=tuple(AirRouteLeg(**item) for item in json.loads(row["route_legs_json"])),
+            normalized_route_legs=tuple(AirRouteLeg(**item) for item in json.loads(row["normalized_route_legs_json"])),
+            current_sector_id=row["current_sector_id"],
+            last_updated_at=_parse_dt(row["last_updated_at"]),
+            metadata=json.loads(row["metadata_json"]),
+        )
+
     def _row_to_world_control_point(self, row: sqlite3.Row) -> WorldControlPointState:
         return WorldControlPointState(
             control_point_id=row["control_point_id"],
@@ -3327,6 +3578,7 @@ class SQLiteStateStore:
                     )
                     for item in payload["resource_state"]["available_reserves"]
                 ),
+                air_package_inventories=tuple(payload["resource_state"].get("air_package_inventories", ())),
                 recently_lost_assets=tuple(payload["resource_state"].get("recently_lost_assets", ())),
                 restrictions=tuple(payload["resource_state"].get("restrictions", ())),
                 key_shortages=tuple(payload["resource_state"].get("key_shortages", ())),
@@ -3354,6 +3606,11 @@ class SQLiteStateStore:
                     task=item["task"],
                     mobility=item["mobility"],
                     health_band=item["health_band"],
+                    category=item.get("category"),
+                    control_point_id=item.get("control_point_id"),
+                    altitude_ft_msl=item.get("altitude_ft_msl"),
+                    heading_deg=item.get("heading_deg"),
+                    speed_kts=item.get("speed_kts"),
                     high_value=bool(item.get("high_value", False)),
                 )
                 for item in payload["friendly_forces"]
@@ -3374,6 +3631,10 @@ class SQLiteStateStore:
                 )
                 for item in payload["enemy_contacts"]
             ),
+            air_packages=tuple(payload.get("air_packages", ())),
+            map_context=dict(payload.get("map_context", {})),
+            terrain_summary=tuple(payload.get("terrain_summary", ())),
+            landmarks=tuple(payload.get("landmarks", ())),
             recent_changes=tuple(payload["recent_changes"]),
             standing_orders=tuple(payload["standing_orders"]),
             requests_for_decision=tuple(payload["requests_for_decision"]),

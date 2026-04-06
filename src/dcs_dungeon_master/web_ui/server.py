@@ -5,6 +5,7 @@ from __future__ import annotations
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import mimetypes
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -19,6 +20,8 @@ def serve_web_ui(
     static_dir: str | Path | None = None,
 ) -> None:
     static_root = Path(static_dir) if static_dir is not None else Path("frontend/dist")
+    attachment_root = Path(service.config.multimodal.output_dir)
+    map_asset_root = service.map_asset_service.asset_root if service.map_asset_service is not None else None
 
     class Handler(BaseHTTPRequestHandler):
         def do_OPTIONS(self) -> None:  # noqa: N802
@@ -60,6 +63,8 @@ def serve_web_ui(
                 except json.JSONDecodeError:
                     self._send_json(400, {"error": "Request body must be valid JSON."})
                     return
+            if self._serve_public_file(parsed.path):
+                return
             self._serve_app_shell(parsed.path)
 
         def _read_json_body(self) -> dict:
@@ -99,15 +104,42 @@ def serve_web_ui(
             self.send_header("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS")
             self.send_header("Access-Control-Allow-Headers", "Content-Type")
 
+        def _serve_public_file(self, path: str) -> bool:
+            if path.startswith("/attachments/"):
+                candidate = self._resolve_public_path(attachment_root, path.removeprefix("/attachments/"))
+                if candidate is not None:
+                    self._send_file(candidate)
+                    return True
+            if map_asset_root is not None and path.startswith("/map-assets/"):
+                candidate = self._resolve_public_path(map_asset_root, path.removeprefix("/map-assets/"))
+                if candidate is not None:
+                    self._send_file(candidate)
+                    return True
+            return False
+
+        def _resolve_public_path(self, root: Path, relative: str) -> Path | None:
+            candidate = (root / relative).resolve()
+            try:
+                candidate.relative_to(root.resolve())
+            except Exception:  # noqa: BLE001
+                return None
+            return candidate if candidate.is_file() else None
+
+        def _send_file(self, path: Path) -> None:
+            data = path.read_bytes()
+            media_type, _ = mimetypes.guess_type(path.name)
+            self.send_response(HTTPStatus.OK)
+            self._send_cors_headers()
+            self.send_header("Content-Type", media_type or "application/octet-stream")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
         def _serve_app_shell(self, path: str) -> None:
             if static_root.exists() and static_root.is_dir():
                 candidate = static_root / path.lstrip("/")
                 if candidate.is_file():
-                    data = candidate.read_bytes()
-                    self.send_response(HTTPStatus.OK)
-                    self.send_header("Content-Length", str(len(data)))
-                    self.end_headers()
-                    self.wfile.write(data)
+                    self._send_file(candidate)
                     return
                 index_path = static_root / "index.html"
                 if index_path.exists():

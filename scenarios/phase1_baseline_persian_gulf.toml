@@ -132,6 +132,26 @@ strategic_value = "high"
 lat = 25.88
 lng = 55.03
 
+[[air_package_inventories]]
+id = "red_fixed_wing_inventory"
+coalition = "red"
+origin_control_point_id = "red_rear_airbase"
+aircraft_type = "MiG-29S"
+aircraft_category = "fixed_wing"
+available_count = 8
+package_types = ["cap", "strike", "escort", "sead"]
+default_altitude_ft_msl = 18000
+
+[[air_package_inventories]]
+id = "blue_fixed_wing_inventory"
+coalition = "blue"
+origin_control_point_id = "blue_rear_airbase"
+aircraft_type = "F-16C"
+aircraft_category = "fixed_wing"
+available_count = 8
+package_types = ["cap", "strike", "escort", "sead"]
+default_altitude_ft_msl = 18000
+
 [[zones]]
 id = "red_rear_fallback_zone"
 name = "Red Rear Fallback Zone"

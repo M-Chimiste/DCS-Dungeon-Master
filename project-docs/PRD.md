@@ -73,15 +73,17 @@ Create a modular commander harness that can run against DCS World in live scenar
 - A paired commander harness with one strategic commander for REDFOR and one strategic commander for BLUFOR
 - Model adapter layer supporting OpenAI-compatible APIs plus provider-specific adapters where required
 - Observation builder that summarizes sectors, known contacts, friendly assets, available reserves, and recent changes for each coalition separately
+- Local theater basemap, landmark, and terrain context as optional coalition-filtered map support for the UI and multimodal-capable backends
 - Action layer that turns approved LLM decisions into Olympus and/or DCS-gRPC operations
 - Resource and force-availability layer outside the model
 - Ground-based deployment and movement of strategic assets
+- Package-first air tasking with terrain-aware route validation and altitude normalization
 - Simultaneous decision cycles for both coalition commanders, with controls to stagger or serialize execution if needed for safety
 - Logging, replay, and offline evaluation support
 
 ### Out Of Scope For The First Build
 
-- Fully autonomous package-level air war planning across the full theater
+- Fully autonomous unconstrained air war planning across the full theater
 - Detailed logistics and maintenance simulation
 - Automated mission generation
 - Multi-modal vision of arbitrary screenshots as a required dependency for core operation
@@ -125,6 +127,7 @@ This means Phase 1 should prefer a "state-to-text and state-to-JSON" observation
 - The observation must include friendly unit and asset disposition at a commander-appropriate level of abstraction
 - The observation must include known or suspected enemy contacts with uncertainty and staleness
 - The observation must include important terrain or control abstractions such as sectors, airbases, fronts, and protected zones
+- The observation may include coalition-filtered map imagery, landmarks, and terrain summaries as secondary context
 - The observation must include resource availability and current deployment capacity
 - The observation must include recent changes since the previous decision cycle
 - The observation format must be stable enough for offline evaluation and prompt iteration
@@ -142,6 +145,7 @@ This means Phase 1 should prefer a "state-to-text and state-to-JSON" observation
 - The model must be able to request deployment of approved ground assets
 - The model must be able to request repositioning or retasking of existing controlled assets
 - The model must be able to set strategic priorities such as sector emphasis or defensive posture
+- The model may request package-first air routes and altitudes, but the harness remains responsible for terrain safety normalization and rejection
 - The command layer must validate every action against available resources, location rules, and coalition permissions
 - Invalid or infeasible actions must be rejected with machine-readable reasons
 

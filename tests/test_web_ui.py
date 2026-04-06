@@ -17,11 +17,40 @@ from dcs_dungeon_master.scenario_state.registry import get_scenario_definition
 from dcs_dungeon_master.sensor_fusion import SensorFusionService
 from dcs_dungeon_master.web_ui import PydcsReferenceService, ScenarioDraftService, WebUiService
 from dcs_dungeon_master.world_state import WorldStateRepository, WorldStateUpdater
+from tests.support_map_assets import write_test_map_assets
 
 
-def _write_temp_config(tmp_path: Path, *, registry_path: Path = Path("scenarios/index.toml")) -> Path:
+def _write_temp_config(
+    tmp_path: Path,
+    *,
+    registry_path: Path = Path("scenarios/index.toml"),
+    asset_root: Path | None = None,
+) -> Path:
     config_path = tmp_path / "config.toml"
     db_path = tmp_path / "state.sqlite3"
+    map_assets_block = ""
+    if asset_root is not None:
+        map_assets_block = f"""
+
+[multimodal]
+enabled = true
+output_dir = "{tmp_path / 'attachments'}"
+
+[map_assets]
+asset_root = "{asset_root}"
+
+[map_assets.theaters.persian_gulf]
+theater_name = "Persian Gulf"
+basemap_manifest = "persian_gulf/basemap.json"
+elevation_manifest = "persian_gulf/elevation.json"
+landmarks_manifest = "persian_gulf/landmarks.json"
+
+[air_ops]
+enabled = true
+fixed_wing_clearance_ft = 2000
+helicopter_clearance_ft = 500
+terrain_sample_nm = 2
+"""
     config_path.write_text(
         f"""
 [runtime]
@@ -68,6 +97,7 @@ enable_wal = true
 [dry_run]
 enabled = true
 summary_output = "text"
+{map_assets_block}
 """.strip(),
         encoding="utf-8",
     )
@@ -307,6 +337,26 @@ def test_web_ui_ops_snapshot_and_scenario_routes(tmp_path: Path) -> None:
     assert ops_payload["ops"]["run"]["run_id"] == run_id
     assert ops_payload["ops"]["operator_map_layers"]["world_groups"]
     assert ops_payload["ops"]["red_inspection"]["latest_observation"] is not None
+
+
+def test_web_ui_exposes_basemap_and_preview_images_when_assets_are_configured(tmp_path: Path) -> None:
+    asset_root = tmp_path / "map-assets"
+    write_test_map_assets(asset_root)
+    config_path = _write_temp_config(tmp_path, asset_root=asset_root)
+    _, run_id = _seed_run_with_observations(config_path)
+    service = WebUiService.from_config_path(config_path)
+
+    scenario_status, scenario_payload = service.dispatch("GET", "/api/scenarios/phase1_baseline_persian_gulf")
+    preview_status, preview_payload = service.dispatch("GET", f"/api/runs/{run_id}/commander-preview/red")
+    ops_status, ops_payload = service.dispatch("GET", f"/api/runs/{run_id}/ops")
+
+    assert scenario_status == 200
+    assert preview_status == 200
+    assert ops_status == 200
+    assert scenario_payload["map_reference"]["basemap"]["image_url"].startswith("/map-assets/")
+    assert ops_payload["ops"]["operator_map_layers"]["basemap"]["image_url"].startswith("/map-assets/")
+    assert preview_payload["preview"]["map_image_uris"]
+    assert preview_payload["preview"]["map_image_uris"][0].startswith("/attachments/")
 
 
 def test_web_ui_draft_management_routes(tmp_path: Path) -> None:

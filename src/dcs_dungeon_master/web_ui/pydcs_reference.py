@@ -7,15 +7,22 @@ import importlib
 from typing import Any
 
 from dcs_dungeon_master.core.models import MapReferenceLayer, ScenarioDefinition
+from dcs_dungeon_master.map_assets import MapAssetService
+from dcs_dungeon_master.terrain import TerrainService
 
 
 @dataclass(slots=True)
 class PydcsReferenceService:
     """Provide read-only theater reference data when available."""
+    map_asset_service: MapAssetService | None = None
+    terrain_service: TerrainService | None = None
 
     def reference_for_scenario(self, scenario: ScenarioDefinition) -> MapReferenceLayer:
         default_center_lat, default_center_lng, default_radius_nm = self._default_view(scenario)
         airports: tuple[dict[str, Any], ...] = ()
+        basemap = None
+        landmarks: tuple[dict[str, Any], ...] = ()
+        terrain_summary: tuple[dict[str, Any], ...] = ()
         status = "unsupported"
         message = "Using authored fallback reference data only."
 
@@ -33,6 +40,22 @@ class PydcsReferenceService:
             status = "unsupported"
             message = "pydcs terrain metadata is unavailable; using authored fallback reference data."
 
+        if self.map_asset_service is not None:
+            bundle = self.map_asset_service.bundle_for_theater(scenario.theater)
+            if bundle is not None:
+                basemap_path = bundle.basemap_manifest_path.parent / str(bundle.basemap.get("image_path", ""))
+                basemap = {
+                    **bundle.basemap,
+                    "image_url": self.map_asset_service.public_url_for_path(basemap_path),
+                    "image_path": str(basemap_path),
+                }
+                landmarks = tuple(bundle.landmarks)
+                if self.terrain_service is not None:
+                    terrain_summary = self.terrain_service.sector_terrain_summary(bundle, scenario.sectors)
+                if status == "unsupported":
+                    status = "partial"
+                message = "Loaded authored map asset bundle with local basemap and terrain metadata."
+
         return MapReferenceLayer(
             theater_id=scenario.theater,
             reference_status=status,
@@ -40,6 +63,7 @@ class PydcsReferenceService:
             default_center_lat=default_center_lat,
             default_center_lng=default_center_lng,
             default_radius_nm=default_radius_nm,
+            basemap=basemap,
             airports=airports,
             sectors=tuple(
                 {
@@ -79,6 +103,8 @@ class PydcsReferenceService:
                 }
                 for zone in scenario.zones
             ),
+            landmarks=landmarks,
+            terrain_summary=terrain_summary,
         )
 
     def reference_for_blank_scenario(self, scenario: ScenarioDefinition, fallback: ScenarioDefinition | None = None) -> MapReferenceLayer:

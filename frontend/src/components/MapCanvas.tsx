@@ -9,10 +9,13 @@ type SectorLike = {
 
 type MarkerLike = {
   id?: string;
+  control_point_id?: string;
   name?: string;
   sector_id?: string;
   owner?: string | null;
   kind?: string;
+  lat?: number | null;
+  lng?: number | null;
 };
 
 type ZoneLike = {
@@ -36,6 +39,45 @@ type GroupLike = {
   id?: string;
   sector_id?: string | null;
   coalition?: string | null;
+  lat?: number | null;
+  lng?: number | null;
+};
+
+type LandmarkLike = {
+  id?: string;
+  name?: string;
+  lat?: number | null;
+  lng?: number | null;
+};
+
+type TerrainSummaryLike = {
+  sector_id?: string;
+  center_elevation_ft_msl?: number;
+  hazard_level?: string;
+};
+
+type AirRouteLegLike = {
+  leg_id?: string;
+  lat?: number | null;
+  lng?: number | null;
+  altitude_ft_msl?: number | null;
+};
+
+type AirPackageLike = {
+  package_id?: string;
+  coalition?: string | null;
+  current_sector_id?: string | null;
+  route_legs?: AirRouteLegLike[];
+};
+
+type BasemapLike = {
+  image_url?: string | null;
+  bounds?: {
+    north?: number;
+    south?: number;
+    east?: number;
+    west?: number;
+  } | null;
 };
 
 type Props = {
@@ -44,6 +86,10 @@ type Props = {
   zones?: ZoneLike[];
   tracks?: TrackLike[];
   worldGroups?: GroupLike[];
+  airPackages?: AirPackageLike[];
+  landmarks?: LandmarkLike[];
+  terrainSummary?: TerrainSummaryLike[];
+  basemap?: BasemapLike | null;
   title?: string;
   selectedSectorId?: string | null;
   selectedControlPointId?: string | null;
@@ -57,12 +103,18 @@ type Props = {
   onMapClick?: (coords: { lat: number; lng: number }) => void;
 };
 
+const isNumber = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value);
+
 export function MapCanvas({
   sectors,
   controlPoints = [],
   zones = [],
   tracks = [],
   worldGroups = [],
+  airPackages = [],
+  landmarks = [],
+  terrainSummary = [],
+  basemap = null,
   title,
   selectedSectorId = null,
   selectedControlPointId = null,
@@ -75,33 +127,69 @@ export function MapCanvas({
   onZoneSelect,
   onMapClick,
 }: Props) {
-  const width = 720;
-  const height = 420;
+  const width = 920;
+  const height = 560;
+  const bounds = basemap?.bounds ?? null;
+  const boundLatitudes = [bounds?.south, bounds?.north].filter(isNumber);
+  const boundLongitudes = [bounds?.west, bounds?.east].filter(isNumber);
   const latitudes = [
-    ...sectors.map((sector) => sector.center_lat).filter((value): value is number => typeof value === "number"),
-    ...zones.map((zone) => zone.center_lat).filter((value): value is number => typeof value === "number"),
+    ...boundLatitudes,
+    ...sectors.map((sector) => sector.center_lat).filter(isNumber),
+    ...zones.map((zone) => zone.center_lat).filter(isNumber),
+    ...controlPoints.map((point) => point.lat).filter(isNumber),
+    ...worldGroups.map((group) => group.lat).filter(isNumber),
+    ...landmarks.map((landmark) => landmark.lat).filter(isNumber),
   ];
   const longitudes = [
-    ...sectors.map((sector) => sector.center_lng).filter((value): value is number => typeof value === "number"),
-    ...zones.map((zone) => zone.center_lng).filter((value): value is number => typeof value === "number"),
+    ...boundLongitudes,
+    ...sectors.map((sector) => sector.center_lng).filter(isNumber),
+    ...zones.map((zone) => zone.center_lng).filter(isNumber),
+    ...controlPoints.map((point) => point.lng).filter(isNumber),
+    ...worldGroups.map((group) => group.lng).filter(isNumber),
+    ...landmarks.map((landmark) => landmark.lng).filter(isNumber),
   ];
   const defaultCenterLat = referenceCenterLat ?? 25;
   const defaultCenterLng = referenceCenterLng ?? 55;
-  const referenceDelta = Math.max(((referenceRadiusNm ?? 35) / 60) * 2.5, 1);
+  const referenceDelta = Math.max(((referenceRadiusNm ?? 35) / 60) * 2.6, 1);
   const minLat = latitudes.length ? Math.min(...latitudes) : defaultCenterLat - referenceDelta;
   const maxLat = latitudes.length ? Math.max(...latitudes) : defaultCenterLat + referenceDelta;
   const minLng = longitudes.length ? Math.min(...longitudes) : defaultCenterLng - referenceDelta;
   const maxLng = longitudes.length ? Math.max(...longitudes) : defaultCenterLng + referenceDelta;
-  const spanLat = Math.max(referenceDelta * 2, maxLat - minLat || 0.5);
-  const spanLng = Math.max(referenceDelta * 2, maxLng - minLng || 0.5);
+  const spanLat = Math.max(maxLat - minLat || 0.5, referenceDelta * 2);
+  const spanLng = Math.max(maxLng - minLng || 0.5, referenceDelta * 2);
+  const terrainBySector = new Map(terrainSummary.map((item) => [item.sector_id ?? "", item]));
 
   const toPoint = (lat?: number | null, lng?: number | null) => ({
-    x: 60 + (((lng ?? minLng) - minLng) / spanLng) * (width - 120),
-    y: 50 + (1 - (((lat ?? minLat) - minLat) / spanLat)) * (height - 110),
+    x: 48 + ((((lng ?? minLng) - minLng) / spanLng) * (width - 96)),
+    y: 44 + ((1 - (((lat ?? minLat) - minLat) / spanLat)) * (height - 88)),
+  });
+
+  const toLatLng = (x: number, y: number) => ({
+    lng: minLng + (((x - 48) / (width - 96)) * spanLng),
+    lat: minLat + ((1 - ((y - 44) / (height - 88))) * spanLat),
   });
 
   const coordinatesBySector = new Map(sectors.map((sector) => [sector.id, toPoint(sector.center_lat, sector.center_lng)]));
   const coordinatesByZone = new Map(zones.map((zone) => [zone.id, toPoint(zone.center_lat, zone.center_lng)]));
+
+  const zoneRadiusPx = (radiusNm?: number) => {
+    const latDegrees = (radiusNm ?? 10) / 60;
+    return Math.max(10, Math.min(54, (latDegrees / spanLat) * (height - 88)));
+  };
+
+  const pointForMarker = (point: MarkerLike) => {
+    if (isNumber(point.lat) && isNumber(point.lng)) {
+      return toPoint(point.lat, point.lng);
+    }
+    return coordinatesBySector.get(point.sector_id ?? "");
+  };
+
+  const pointForGroup = (group: GroupLike) => {
+    if (isNumber(group.lat) && isNumber(group.lng)) {
+      return toPoint(group.lat, group.lng);
+    }
+    return coordinatesBySector.get(group.sector_id ?? "");
+  };
 
   return (
     <div className="map-card">
@@ -111,6 +199,10 @@ export function MapCanvas({
           <linearGradient id="paper" x1="0%" y1="0%" x2="100%" y2="100%">
             <stop offset="0%" stopColor="#fbf5e5" />
             <stop offset="100%" stopColor="#efe1bf" />
+          </linearGradient>
+          <linearGradient id="mapFade" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" stopColor="rgba(255,255,255,0.06)" />
+            <stop offset="100%" stopColor="rgba(28, 34, 39, 0.18)" />
           </linearGradient>
         </defs>
         <rect
@@ -126,34 +218,52 @@ export function MapCanvas({
             const rect = event.currentTarget.getBoundingClientRect();
             const x = ((event.clientX - rect.left) / rect.width) * width;
             const y = ((event.clientY - rect.top) / rect.height) * height;
-            const lng = minLng + ((x - 60) / (width - 120)) * spanLng;
-            const lat = minLat + (1 - (y - 50) / (height - 110)) * spanLat;
-            onMapClick({ lat, lng });
+            onMapClick(toLatLng(x, y));
           }}
         />
+        {basemap?.image_url ? (
+          <>
+            <image href={basemap.image_url} x="0" y="0" width={width} height={height} preserveAspectRatio="none" />
+            <rect x="0" y="0" width={width} height={height} rx="20" fill="url(#mapFade)" />
+          </>
+        ) : null}
         {zones.map((zone) => {
           const position = coordinatesByZone.get(zone.id);
           if (!position) return null;
-          const radius = Math.max(10, Math.min(42, (zone.radius_nm ?? 12) * 0.55));
           return (
             <g key={zone.id}>
               <circle
                 cx={position.x}
                 cy={position.y}
-                r={radius}
+                r={zoneRadiusPx(zone.radius_nm)}
                 className={`zone-ring ${selectedZoneId === zone.id ? "selected" : ""} ${onZoneSelect ? "interactive" : ""}`}
                 onClick={() => onZoneSelect?.(zone.id)}
               />
-              <text x={position.x} y={position.y - radius - 6} textAnchor="middle" className="marker-label">
+              <text x={position.x} y={position.y - zoneRadiusPx(zone.radius_nm) - 8} textAnchor="middle" className="marker-label">
                 {zone.name ?? zone.id}
               </text>
+            </g>
+          );
+        })}
+        {airPackages.map((airPackage, index) => {
+          const route = (airPackage.route_legs ?? [])
+            .filter((leg) => isNumber(leg.lat) && isNumber(leg.lng))
+            .map((leg) => toPoint(leg.lat, leg.lng));
+          if (!route.length) return null;
+          const polyline = route.map((point) => `${point.x.toFixed(1)},${point.y.toFixed(1)}`).join(" ");
+          const lastPoint = route[route.length - 1];
+          return (
+            <g key={airPackage.package_id ?? `air-package-${index}`}>
+              <polyline points={polyline} className={`air-package-route ${airPackage.coalition ?? "unknown"}`} />
+              <circle cx={lastPoint.x} cy={lastPoint.y} r="7" className={`air-package-node ${airPackage.coalition ?? "unknown"}`} />
             </g>
           );
         })}
         {sectors.map((sector) => {
           const position = coordinatesBySector.get(sector.id);
           if (!position) return null;
-          const radius = Math.max(18, Math.min(48, (sector.radius_nm ?? 35) * 0.55));
+          const radius = Math.max(18, Math.min(52, zoneRadiusPx(sector.radius_nm)));
+          const terrain = terrainBySector.get(sector.id);
           return (
             <g key={sector.id}>
               <circle
@@ -163,40 +273,68 @@ export function MapCanvas({
                 className={`sector-ring sector-${sector.role ?? "unknown"} ${selectedSectorId === sector.id ? "selected" : ""} ${onSectorSelect ? "interactive" : ""}`}
                 onClick={() => onSectorSelect?.(sector.id)}
               />
+              {terrain?.hazard_level ? (
+                <circle
+                  cx={position.x}
+                  cy={position.y}
+                  r={radius + 6}
+                  className={`terrain-halo terrain-${terrain.hazard_level}`}
+                />
+              ) : null}
               <text x={position.x} y={position.y + 4} textAnchor="middle" className="sector-label">
                 {sector.name ?? sector.id}
+              </text>
+              {terrain?.center_elevation_ft_msl ? (
+                <text x={position.x} y={position.y + radius + 14} textAnchor="middle" className="marker-label terrain-label">
+                  {Math.round(terrain.center_elevation_ft_msl)} ft
+                </text>
+              ) : null}
+            </g>
+          );
+        })}
+        {landmarks.map((landmark, index) => {
+          if (!isNumber(landmark.lat) || !isNumber(landmark.lng)) return null;
+          const position = toPoint(landmark.lat, landmark.lng);
+          return (
+            <g key={landmark.id ?? `landmark-${index}`}>
+              <path
+                d={`M ${position.x.toFixed(1)} ${(position.y - 11).toFixed(1)} L ${(position.x - 7).toFixed(1)} ${(position.y + 5).toFixed(1)} L ${(position.x + 7).toFixed(1)} ${(position.y + 5).toFixed(1)} Z`}
+                className="landmark-mark"
+              />
+              <text x={position.x + 10} y={position.y - 10} className="marker-label">
+                {landmark.name ?? landmark.id ?? "Landmark"}
               </text>
             </g>
           );
         })}
         {controlPoints.map((point, index) => {
-          const position = coordinatesBySector.get(point.sector_id ?? "");
+          const position = pointForMarker(point);
+          const pointId = point.id ?? point.control_point_id;
           if (!position) return null;
           return (
-            <g key={`${point.id ?? point.name}-${index}`}>
+            <g key={`${pointId ?? point.name}-${index}`}>
               <rect
                 x={position.x - 7}
                 y={position.y - 32}
                 width="14"
                 height="14"
-                className={`control-point owner-${point.owner ?? "unknown"} ${selectedControlPointId === point.id ? "selected" : ""} ${onControlPointSelect ? "interactive" : ""}`}
-                onClick={() => point.id && onControlPointSelect?.(point.id)}
+                className={`control-point owner-${point.owner ?? "unknown"} ${selectedControlPointId === pointId ? "selected" : ""} ${onControlPointSelect ? "interactive" : ""}`}
+                onClick={() => pointId && onControlPointSelect?.(pointId)}
               />
               <text x={position.x + 12} y={position.y - 18} className="marker-label">
-                {point.name ?? point.id ?? "CP"}
+                {point.name ?? pointId ?? "CP"}
               </text>
             </g>
           );
         })}
         {worldGroups.map((group, index) => {
-          const sectorId = group.sector_id ?? "";
-          const position = coordinatesBySector.get(sectorId);
+          const position = pointForGroup(group);
           if (!position) return null;
           return (
             <circle
-              key={`${group.id ?? sectorId}-${index}`}
-              cx={position.x - 18}
-              cy={position.y + 18}
+              key={`${group.id ?? group.sector_id}-${index}`}
+              cx={position.x - 16}
+              cy={position.y + 14}
               r="5"
               className={`world-group ${group.coalition ?? "unknown"}`}
             />
@@ -207,14 +345,13 @@ export function MapCanvas({
           const position = coordinatesBySector.get(sectorId);
           if (!position) return null;
           return (
-            <g key={`${track.track_id ?? sectorId}-${index}`}>
-              <circle
-                cx={position.x}
-                cy={position.y + 28}
-                r="7"
-                className={`track-dot ${track.stale ? "stale" : "fresh"} ${track.inferred ? "inferred" : ""}`}
-              />
-            </g>
+            <circle
+              key={`${track.track_id ?? sectorId}-${index}`}
+              cx={position.x}
+              cy={position.y + 28}
+              r="7"
+              className={`track-dot ${track.stale ? "stale" : "fresh"} ${track.inferred ? "inferred" : ""}`}
+            />
           );
         })}
       </svg>

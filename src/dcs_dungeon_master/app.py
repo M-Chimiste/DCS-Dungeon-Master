@@ -16,6 +16,7 @@ from dcs_dungeon_master.evaluation import EvaluationService, build_evaluation_me
 from dcs_dungeon_master.execution import ExecutionEngine, LiveCommandLoopRunner
 from dcs_dungeon_master.integration import IntegrationIngestCoordinator, build_integration_services
 from dcs_dungeon_master.live_mission_attach import LiveMissionAttachService
+from dcs_dungeon_master.map_assets import MapAssetService
 from dcs_dungeon_master.model_adapter import DryDecisionLoopRunner, build_model_registry
 from dcs_dungeon_master.observation import ObservationBuilder
 from dcs_dungeon_master.operator_control import OperatorControlService
@@ -24,6 +25,7 @@ from dcs_dungeon_master.run_continuation import RunContinuationService
 from dcs_dungeon_master.scenario_state.registry import get_scenario_definition
 from dcs_dungeon_master.sensor_fusion import SensorFusionService
 from dcs_dungeon_master.setup_wizard import SetupWizardService
+from dcs_dungeon_master.terrain import TerrainService
 from dcs_dungeon_master.world_state import KnowledgeDebugView, WorldStateRepository, WorldStateUpdater
 
 
@@ -81,8 +83,24 @@ def bootstrap_application(config_path: str | Path = DEFAULT_CONFIG_PATH) -> Appl
     world_repository = WorldStateRepository(store)
     world_updater = WorldStateUpdater(world_repository, scenario)
     sensor_fusion = SensorFusionService(store, scenario, config.fog_of_war)
-    observation_builder = ObservationBuilder(store, scenario, sensor_fusion, config.multimodal)
-    action_validator = ActionValidator(store, scenario)
+    map_asset_service = MapAssetService(config.map_assets)
+    terrain_service = TerrainService(config.air_ops)
+    observation_builder = ObservationBuilder(
+        store,
+        scenario,
+        sensor_fusion,
+        config.multimodal,
+        map_asset_service=map_asset_service,
+        terrain_service=terrain_service,
+        air_ops=config.air_ops,
+    )
+    action_validator = ActionValidator(
+        store,
+        scenario,
+        map_asset_service=map_asset_service,
+        terrain_service=terrain_service,
+        air_ops=config.air_ops,
+    )
     model_registry = build_model_registry(config)
     debug_view = KnowledgeDebugView(store, sensor_fusion)
     operator_control = OperatorControlService(store, sensor_fusion=sensor_fusion, world_repository=world_repository)

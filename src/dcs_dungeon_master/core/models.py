@@ -43,6 +43,7 @@ class ScenarioDefinition:
     reserve_groups: tuple["ReserveGroupState", ...]
     zones: tuple["ScenarioZone", ...] = ()
     deployment_restrictions: tuple["DeploymentRestrictionState", ...] = ()
+    air_package_inventories: tuple["AirPackageInventoryState", ...] = ()
 
     @property
     def sector_ids(self) -> tuple[str, ...]:
@@ -148,6 +149,52 @@ class DeploymentRestrictionState:
     sector_ids: tuple[str, ...] = ()
     control_point_ids: tuple[str, ...] = ()
     adjacency_limited: bool = False
+
+
+@dataclass(slots=True, frozen=True)
+class AirPackageInventoryState:
+    id: str
+    coalition: Coalition
+    origin_control_point_id: str
+    aircraft_type: str
+    aircraft_category: str
+    available_count: int
+    package_types: tuple[str, ...] = ()
+    default_altitude_ft_msl: int | None = None
+
+
+@dataclass(slots=True, frozen=True)
+class AirRouteLeg:
+    leg_id: str
+    reference_type: str
+    reference_id: str | None = None
+    lat: float | None = None
+    lng: float | None = None
+    altitude_ft_msl: int | None = None
+    task: str | None = None
+    note: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True, frozen=True)
+class AirPackageState:
+    package_id: str
+    coalition: Coalition
+    package_type: str
+    aircraft_type: str
+    aircraft_category: str
+    aircraft_count: int
+    origin_control_point_id: str
+    status: str
+    posture: str
+    roe: str
+    target_reference_type: str | None = None
+    target_reference_id: str | None = None
+    route_legs: tuple[AirRouteLeg, ...] = ()
+    normalized_route_legs: tuple[AirRouteLeg, ...] = ()
+    current_sector_id: str | None = None
+    last_updated_at: datetime | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(slots=True, frozen=True)
@@ -362,6 +409,7 @@ class ReserveAvailabilityView:
 class ResourceStateView:
     deployment_budget_remaining: int
     available_reserves: tuple[ReserveAvailabilityView, ...]
+    air_package_inventories: tuple[dict[str, Any], ...] = ()
     recently_lost_assets: tuple[str, ...] = ()
     restrictions: tuple[str, ...] = ()
     key_shortages: tuple[str, ...] = ()
@@ -414,6 +462,11 @@ class FriendlyForceEntry:
     task: str
     mobility: str
     health_band: str
+    category: str | None = None
+    control_point_id: str | None = None
+    altitude_ft_msl: float | None = None
+    heading_deg: float | None = None
+    speed_kts: float | None = None
     high_value: bool = False
 
 
@@ -441,9 +494,13 @@ class CommanderObservation:
     sector_summary: tuple[SectorSummaryEntry, ...]
     friendly_forces: tuple[FriendlyForceEntry, ...]
     enemy_contacts: tuple[EnemyContactEntry, ...]
-    recent_changes: tuple[str, ...]
-    standing_orders: tuple[str, ...]
-    requests_for_decision: tuple[str, ...]
+    air_packages: tuple[dict[str, Any], ...] = ()
+    map_context: dict[str, Any] = field(default_factory=dict)
+    terrain_summary: tuple[dict[str, Any], ...] = ()
+    landmarks: tuple[dict[str, Any], ...] = ()
+    recent_changes: tuple[str, ...] = ()
+    standing_orders: tuple[str, ...] = ()
+    requests_for_decision: tuple[str, ...] = ()
     attachments: tuple[ObservationAttachment, ...] = ()
 
 
@@ -1023,10 +1080,13 @@ class MapReferenceLayer:
     default_center_lat: float | None = None
     default_center_lng: float | None = None
     default_radius_nm: float | None = None
+    basemap: dict[str, Any] | None = None
     airports: tuple[dict[str, Any], ...] = ()
     sectors: tuple[dict[str, Any], ...] = ()
     control_points: tuple[dict[str, Any], ...] = ()
     zones: tuple[dict[str, Any], ...] = ()
+    landmarks: tuple[dict[str, Any], ...] = ()
+    terrain_summary: tuple[dict[str, Any], ...] = ()
 
 
 @dataclass(slots=True, frozen=True)
@@ -1072,14 +1132,18 @@ class ScenarioDraftView:
 
 @dataclass(slots=True, frozen=True)
 class OperatorMapLayerSet:
+    basemap: dict[str, Any] | None = None
     sectors: tuple[dict[str, Any], ...] = ()
     control_points: tuple[dict[str, Any], ...] = ()
     zones: tuple[dict[str, Any], ...] = ()
     world_groups: tuple[dict[str, Any], ...] = ()
+    air_packages: tuple[dict[str, Any], ...] = ()
     red_knowledge_tracks: tuple[dict[str, Any], ...] = ()
     blue_knowledge_tracks: tuple[dict[str, Any], ...] = ()
     current_execution_notes: tuple[dict[str, Any], ...] = ()
     attachments: tuple[dict[str, Any], ...] = ()
+    landmarks: tuple[dict[str, Any], ...] = ()
+    terrain_summary: tuple[dict[str, Any], ...] = ()
 
 
 @dataclass(slots=True, frozen=True)
@@ -1092,6 +1156,7 @@ class CommanderPreviewSnapshot:
     narrative: str
     observation: CommanderObservation
     map_overlay_uri: str | None = None
+    map_image_uris: tuple[str, ...] = ()
 
 
 @dataclass(slots=True, frozen=True)

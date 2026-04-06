@@ -20,6 +20,7 @@ from dcs_dungeon_master.evaluation import EvaluationService, build_evaluation_me
 from dcs_dungeon_master.execution import ExecutionEngine, LiveCommandLoopRunner
 from dcs_dungeon_master.integration import IntegrationIngestCoordinator, build_integration_services
 from dcs_dungeon_master.integration.grpc_codegen import generate_vendored_stubs
+from dcs_dungeon_master.map_assets import MapAssetService
 from dcs_dungeon_master.model_adapter import DryDecisionLoopRunner, build_model_registry
 from dcs_dungeon_master.observation import ObservationBuilder
 from dcs_dungeon_master.operator_control import OperatorControlService
@@ -28,6 +29,7 @@ from dcs_dungeon_master.run_continuation import RunContinuationService
 from dcs_dungeon_master.scenario_state.registry import get_scenario_definition
 from dcs_dungeon_master.sensor_fusion import SensorFusionService
 from dcs_dungeon_master.setup_wizard import SetupWizardService
+from dcs_dungeon_master.terrain import TerrainService
 from dcs_dungeon_master.web_ui import WebUiService, serve_web_ui
 from dcs_dungeon_master.world_state import KnowledgeDebugView, WorldStateRepository, WorldStateUpdater
 
@@ -105,6 +107,29 @@ def _build_model_registry_for_run(config, run_state):
         )
     except TypeError:
         return build_model_registry(config)
+
+
+def _build_observation_builder(store, scenario, config):
+    sensor_fusion = SensorFusionService(store, scenario, config.fog_of_war)
+    return ObservationBuilder(
+        store,
+        scenario,
+        sensor_fusion,
+        config.multimodal,
+        map_asset_service=MapAssetService(config.map_assets),
+        terrain_service=TerrainService(config.air_ops),
+        air_ops=config.air_ops,
+    )
+
+
+def _build_action_validator(store, scenario, config):
+    return ActionValidator(
+        store,
+        scenario,
+        map_asset_service=MapAssetService(config.map_assets),
+        terrain_service=TerrainService(config.air_ops),
+        air_ops=config.air_ops,
+    )
 
 
 def _print_payload(payload) -> None:
@@ -652,7 +677,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         scenario = get_scenario_definition(config.scenario.id, config.scenario.registry_path)
         store = SQLiteStateStore(config.persistence.db_path, enable_wal=config.persistence.enable_wal)
         resolved_run_id = args.run_id or store.get_latest_run_id()
-        builder = ObservationBuilder(store, scenario, SensorFusionService(store, scenario, config.fog_of_war), config.multimodal)
+        builder = _build_observation_builder(store, scenario, config)
         artifact = builder.build_observation(
             resolved_run_id,
             Coalition(args.coalition),
@@ -667,7 +692,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         scenario = get_scenario_definition(config.scenario.id, config.scenario.registry_path)
         store = SQLiteStateStore(config.persistence.db_path, enable_wal=config.persistence.enable_wal)
         resolved_run_id = args.run_id or store.get_latest_run_id()
-        builder = ObservationBuilder(store, scenario, SensorFusionService(store, scenario, config.fog_of_war), config.multimodal)
+        builder = _build_observation_builder(store, scenario, config)
         red_artifact, blue_artifact = builder.build_observation_pair(
             resolved_run_id,
             args.decision_cycle,
@@ -684,7 +709,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         config = load_config(args.config)
         scenario = get_scenario_definition(config.scenario.id, config.scenario.registry_path)
         store = SQLiteStateStore(config.persistence.db_path, enable_wal=config.persistence.enable_wal)
-        builder = ObservationBuilder(store, scenario, SensorFusionService(store, scenario, config.fog_of_war), config.multimodal)
+        builder = _build_observation_builder(store, scenario, config)
         payload = builder.summarize_latest(args.run_id or store.get_latest_run_id(), Coalition(args.coalition))
         print(json.dumps(payload, indent=2, sort_keys=True, default=str))
         return 0
@@ -693,7 +718,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         config = load_config(args.config)
         scenario = get_scenario_definition(config.scenario.id, config.scenario.registry_path)
         store = SQLiteStateStore(config.persistence.db_path, enable_wal=config.persistence.enable_wal)
-        builder = ObservationBuilder(store, scenario, SensorFusionService(store, scenario, config.fog_of_war), config.multimodal)
+        builder = _build_observation_builder(store, scenario, config)
         payload = builder.render_latest(args.run_id or store.get_latest_run_id(), Coalition(args.coalition), args.format)
         if isinstance(payload, str):
             print(payload)
@@ -705,7 +730,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         config = load_config(args.config)
         scenario = get_scenario_definition(config.scenario.id, config.scenario.registry_path)
         store = SQLiteStateStore(config.persistence.db_path, enable_wal=config.persistence.enable_wal)
-        validator = ActionValidator(store, scenario)
+        validator = _build_action_validator(store, scenario, config)
         resolved_run_id = args.run_id or store.get_latest_run_id()
         raw_payload = args.input_file.read_text(encoding="utf-8") if args.input_file else args.input
         payload = json.loads(raw_payload)
@@ -723,7 +748,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         config = load_config(args.config)
         scenario = get_scenario_definition(config.scenario.id, config.scenario.registry_path)
         store = SQLiteStateStore(config.persistence.db_path, enable_wal=config.persistence.enable_wal)
-        validator = ActionValidator(store, scenario)
+        validator = _build_action_validator(store, scenario, config)
         payload = validator.summarize_latest(args.run_id or store.get_latest_run_id(), Coalition(args.coalition))
         print(json.dumps(payload, indent=2, sort_keys=True, default=str))
         return 0
@@ -733,8 +758,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         scenario = get_scenario_definition(config.scenario.id, config.scenario.registry_path)
         store = SQLiteStateStore(config.persistence.db_path, enable_wal=config.persistence.enable_wal)
         sensor_fusion = SensorFusionService(store, scenario, config.fog_of_war)
-        observation_builder = ObservationBuilder(store, scenario, sensor_fusion, config.multimodal)
-        validator = ActionValidator(store, scenario)
+        observation_builder = ObservationBuilder(
+            store,
+            scenario,
+            sensor_fusion,
+            config.multimodal,
+            map_asset_service=MapAssetService(config.map_assets),
+            terrain_service=TerrainService(config.air_ops),
+            air_ops=config.air_ops,
+        )
+        validator = _build_action_validator(store, scenario, config)
         integrations = build_integration_services(config.dcs)
         registry = build_model_registry(config)
         try:
@@ -886,8 +919,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         operator = OperatorControlService(store)
         world_repository = WorldStateRepository(store)
         world_updater = WorldStateUpdater(world_repository, scenario)
-        observation_builder = ObservationBuilder(store, scenario, SensorFusionService(store, scenario, config.fog_of_war), config.multimodal)
-        validator = ActionValidator(store, scenario)
+        observation_builder = _build_observation_builder(store, scenario, config)
+        validator = _build_action_validator(store, scenario, config)
         integrations = build_integration_services(config.dcs)
         registry = _build_model_registry_for_run(config, run_state)
         try:
@@ -921,8 +954,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         operator = OperatorControlService(store)
         world_repository = WorldStateRepository(store)
         world_updater = WorldStateUpdater(world_repository, scenario)
-        observation_builder = ObservationBuilder(store, scenario, SensorFusionService(store, scenario, config.fog_of_war), config.multimodal)
-        validator = ActionValidator(store, scenario)
+        observation_builder = _build_observation_builder(store, scenario, config)
+        validator = _build_action_validator(store, scenario, config)
         integrations = build_integration_services(config.dcs)
         registry = _build_model_registry_for_run(config, run_state)
         try:
@@ -953,8 +986,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         scenario = get_scenario_definition(config.scenario.id, config.scenario.registry_path)
         store = SQLiteStateStore(config.persistence.db_path, enable_wal=config.persistence.enable_wal)
         run_state = store.get_run_control_state(args.run_id or store.get_latest_run_id())
-        observation_builder = ObservationBuilder(store, scenario, SensorFusionService(store, scenario, config.fog_of_war), config.multimodal)
-        validator = ActionValidator(store, scenario)
+        observation_builder = _build_observation_builder(store, scenario, config)
+        validator = _build_action_validator(store, scenario, config)
         registry = _build_model_registry_for_run(config, run_state)
         try:
             runner = DryDecisionLoopRunner(store, observation_builder, validator, registry)
@@ -973,8 +1006,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         operator = OperatorControlService(store)
         world_repository = WorldStateRepository(store)
         world_updater = WorldStateUpdater(world_repository, scenario)
-        observation_builder = ObservationBuilder(store, scenario, SensorFusionService(store, scenario, config.fog_of_war), config.multimodal)
-        validator = ActionValidator(store, scenario)
+        observation_builder = _build_observation_builder(store, scenario, config)
+        validator = _build_action_validator(store, scenario, config)
         integrations = build_integration_services(config.dcs)
         registry = _build_model_registry_for_run(config, run_state)
         try:
@@ -1010,8 +1043,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         operator = OperatorControlService(store)
         world_repository = WorldStateRepository(store)
         world_updater = WorldStateUpdater(world_repository, scenario)
-        observation_builder = ObservationBuilder(store, scenario, SensorFusionService(store, scenario, config.fog_of_war), config.multimodal)
-        validator = ActionValidator(store, scenario)
+        observation_builder = _build_observation_builder(store, scenario, config)
+        validator = _build_action_validator(store, scenario, config)
         integrations = build_integration_services(config.dcs)
         registry = _build_model_registry_for_run(config, run_state)
         try:

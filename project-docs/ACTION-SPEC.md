@@ -22,6 +22,7 @@ This specification applies to:
 - One BLUFOR commander
 - The Phase 1 baseline scenario in `project-docs/SCENARIO-SPEC.md`
 - Strategic ground-command actions only
+- Air Ops v1 package-first air tasking with terrain-aware route validation
 
 This specification does not authorize unrestricted use of the full Olympus or DCS-gRPC command surface.
 
@@ -103,6 +104,11 @@ Allowed action types:
 - `reinforce_control_point`
 - `withdraw_group`
 - `hold_action`
+- `launch_air_package`
+- `retask_air_package`
+- `abort_air_package`
+- `set_air_package_posture`
+- `set_air_package_roe`
 
 ## Action Definitions
 
@@ -317,13 +323,71 @@ Typical result:
 - No new simulator-side movement or deployment
 - Log that the commander intentionally preserved current posture
 
+## Air Ops v1 Extension
+
+Air Ops v1 keeps the same bounded-control rule while allowing package-first air tasking:
+
+- The model may request route legs and `altitude_ft_msl` values
+- The harness resolves sectors, control points, zones, landmarks, and coalition-visible contacts into concrete geometry
+- The harness samples terrain along each leg and raises unsafe altitudes when a safe correction is possible
+- Raw coordinates are allowed for transit or orbit legs, not for hidden-target attack authoring
+
+### `launch_air_package`
+
+Required fields:
+
+- `inventory_id`
+- `package_type`
+- `aircraft_count`
+- `route_legs`
+
+Optional fields:
+
+- `target_reference_type`
+- `target_reference_id`
+- `posture`
+- `roe`
+
+### `retask_air_package`
+
+Required fields:
+
+- `package_id`
+- `route_legs`
+
+Optional fields:
+
+- `target_reference_type`
+- `target_reference_id`
+
+### `abort_air_package`
+
+Required fields:
+
+- `package_id`
+- `abort_reason`
+
+### `set_air_package_posture`
+
+Required fields:
+
+- `package_id`
+- `posture`
+
+### `set_air_package_roe`
+
+Required fields:
+
+- `package_id`
+- `roe`
+
 ## Phase 1 Disallowed Action Types
 
 The following are explicitly out of scope for the model in Phase 1:
 
 - Arbitrary raw unit spawning
 - Direct effect spawning for smoke, flares, explosions, or spectacle
-- Tactical aircraft flight path micromanagement
+- Per-aircraft freeform micromanagement outside the bounded package contract
 - Direct attack-task authoring against exact hidden enemy positions
 - Arbitrary deletion of friendly or enemy units
 - Access to raw Olympus or DCS-gRPC methods not wrapped by this action contract

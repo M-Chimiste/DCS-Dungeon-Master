@@ -28,12 +28,14 @@ from dcs_dungeon_master.core.models import (
     ScenarioDraftPatch,
 )
 from dcs_dungeon_master.evaluation import build_evaluation_metadata
+from dcs_dungeon_master.map_assets import MapAssetService
 from dcs_dungeon_master.model_adapter import build_model_registry
 from dcs_dungeon_master.operator_control import OperatorControlService
 from dcs_dungeon_master.persistence import SQLiteStateStore
 from dcs_dungeon_master.run_continuation import RunContinuationService
 from dcs_dungeon_master.scenario_state.registry import get_scenario_definition, list_scenarios, scenario_definition_to_dict
 from dcs_dungeon_master.setup_wizard import SetupWizardService
+from dcs_dungeon_master.terrain import TerrainService
 from dcs_dungeon_master.web_ui.pydcs_reference import PydcsReferenceService
 from dcs_dungeon_master.web_ui.scenario_drafts import ScenarioDraftService
 
@@ -63,13 +65,20 @@ class WebUiService:
     setup_wizard: SetupWizardService
     draft_service: ScenarioDraftService
     registry_path: Path
+    map_asset_service: MapAssetService | None = None
+    terrain_service: TerrainService | None = None
 
     @classmethod
     def from_config_path(cls, config_path: str | Path = DEFAULT_CONFIG_PATH) -> "WebUiService":
         config = load_config(config_path)
         store = SQLiteStateStore(config.persistence.db_path, enable_wal=config.persistence.enable_wal)
         store.initialize_schema()
-        reference_service = PydcsReferenceService()
+        map_asset_service = MapAssetService(config.map_assets)
+        terrain_service = TerrainService(config.air_ops)
+        reference_service = PydcsReferenceService(
+            map_asset_service=map_asset_service,
+            terrain_service=terrain_service,
+        )
         draft_service = ScenarioDraftService(store, index_path=config.scenario.registry_path, reference_service=reference_service)
         operator = OperatorControlService(store)
         continuation = RunContinuationService(store, operator)
@@ -82,6 +91,8 @@ class WebUiService:
             setup_wizard=setup_wizard,
             draft_service=draft_service,
             registry_path=Path(config.scenario.registry_path),
+            map_asset_service=map_asset_service,
+            terrain_service=terrain_service,
         )
 
     @property
@@ -377,7 +388,19 @@ class WebUiService:
 
     def get_commander_preview(self, run_id: str, coalition: Coalition) -> dict[str, Any]:
         artifact = self.store.get_latest_observation(run_id, coalition)
-        overlay = next((item.uri for item in artifact.observation.attachments if item.role == "map_overlay"), None)
+        overlay = next(
+            (self._attachment_public_url(item.uri) for item in artifact.observation.attachments if item.role == "map_overlay"),
+            None,
+        )
+        map_image_uris = tuple(
+            uri
+            for uri in (
+                self._attachment_public_url(item.uri)
+                for item in artifact.observation.attachments
+                if item.role in {"map_overlay", "map_theater_context", "map_front_aoi"}
+            )
+            if uri is not None
+        )
         preview = CommanderPreviewSnapshot(
             run_id=run_id,
             coalition=coalition,
@@ -387,6 +410,7 @@ class WebUiService:
             narrative=artifact.narrative,
             observation=artifact.observation,
             map_overlay_uri=overlay,
+            map_image_uris=map_image_uris,
         )
         return {"preview": _json_ready(preview)}
 
@@ -732,20 +756,32 @@ class WebUiService:
         return tuple(policies)
 
     def _operator_map_layers(self, run_id: str) -> OperatorMapLayerSet:
+        run = self.operator.get_status(run_id)
+        scenario = get_scenario_definition(run.scenario_id, self.registry_path)
         world = self.store.get_world_state_snapshot(run_id)
         red_knowledge = self._optional(lambda: self.store.get_knowledge_state(Coalition.RED, run_id))
         blue_knowledge = self._optional(lambda: self.store.get_knowledge_state(Coalition.BLUE, run_id))
         latest_observations = self.store.list_observations(run_id)
+        reference = self.draft_service.reference_service.reference_for_scenario(scenario)
         attachments = [
             {
                 "observation_id": artifact.id,
                 "coalition": artifact.coalition.value,
                 "decision_cycle": artifact.decision_cycle,
-                "attachments": [_json_ready(item) for item in artifact.observation.attachments],
+                "attachments": [
+                    _json_ready(
+                        {
+                            **_json_ready(item),
+                            "uri": self._attachment_public_url(item.uri),
+                        }
+                    )
+                    for item in artifact.observation.attachments
+                ],
             }
             for artifact in latest_observations[-2:]
         ]
         return OperatorMapLayerSet(
+            basemap=_json_ready(reference.basemap),
             sectors=tuple(
                 {
                     "id": sector.id,
@@ -756,14 +792,19 @@ class WebUiService:
                     "radius_nm": sector.radius_nm,
                     "neighbor_ids": sector.neighbor_ids,
                 }
-                for sector in get_scenario_definition(self.operator.get_status(run_id).scenario_id, self.registry_path).sectors
+                for sector in scenario.sectors
             ),
             control_points=tuple(
                 {
+                    "id": point.control_point_id,
+                    "name": next((item.name for item in scenario.control_points if item.id == point.control_point_id), point.control_point_id),
                     "control_point_id": point.control_point_id,
                     "owner": point.owner.value if point.owner is not None else None,
                     "sector_id": point.sector_id,
                     "source": point.source,
+                    "kind": next((item.kind for item in scenario.control_points if item.id == point.control_point_id), None),
+                    "lat": next((item.lat for item in scenario.control_points if item.id == point.control_point_id), None),
+                    "lng": next((item.lng for item in scenario.control_points if item.id == point.control_point_id), None),
                 }
                 for point in world.control_points
             ),
@@ -776,7 +817,7 @@ class WebUiService:
                     "center_lng": zone.center_lng,
                     "radius_nm": zone.radius_nm,
                 }
-                for zone in get_scenario_definition(self.operator.get_status(run_id).scenario_id, self.registry_path).zones
+                for zone in scenario.zones
             ),
             world_groups=tuple(
                 {
@@ -791,10 +832,27 @@ class WebUiService:
                 }
                 for group in world.groups
             ),
+            air_packages=tuple(
+                {
+                    "package_id": item.package_id,
+                    "package_type": item.package_type,
+                    "aircraft_type": item.aircraft_type,
+                    "coalition": item.coalition.value,
+                    "status": item.status,
+                    "posture": item.posture,
+                    "roe": item.roe,
+                    "origin_control_point_id": item.origin_control_point_id,
+                    "current_sector_id": item.current_sector_id,
+                    "route_legs": tuple(_json_ready(leg) for leg in item.normalized_route_legs or item.route_legs),
+                }
+                for item in self.store.list_air_packages(run_id)
+            ),
             red_knowledge_tracks=tuple(_json_ready(track) for track in (red_knowledge.contact_tracks if red_knowledge else ())),
             blue_knowledge_tracks=tuple(_json_ready(track) for track in (blue_knowledge.contact_tracks if blue_knowledge else ())),
             current_execution_notes=tuple(_json_ready(note) for note in self.store.list_current_execution_notes(run_id)),
             attachments=tuple(attachments),
+            landmarks=_json_ready(reference.landmarks),
+            terrain_summary=_json_ready(reference.terrain_summary),
         )
 
     def _optional(self, callback):
@@ -802,3 +860,14 @@ class WebUiService:
             return callback()
         except PersistenceError:
             return None
+
+    def _attachment_public_url(self, uri: str | None) -> str | None:
+        if uri is None:
+            return None
+        output_root = Path(self.config.multimodal.output_dir).resolve()
+        candidate = Path(uri).resolve()
+        try:
+            relative = candidate.relative_to(output_root)
+        except Exception:  # noqa: BLE001
+            return None
+        return f"/attachments/{relative.as_posix()}"

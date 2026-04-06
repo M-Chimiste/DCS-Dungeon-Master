@@ -11,6 +11,7 @@ from dcs_dungeon_master.core.enums import Coalition, GroupPosture
 from dcs_dungeon_master.core.exceptions import ConfigError, ScenarioNotFoundError
 from dcs_dungeon_master.core.models import (
     ActiveGroupState,
+    AirPackageInventoryState,
     CoalitionState,
     ControlPointState,
     DeploymentRestrictionState,
@@ -132,6 +133,7 @@ def load_scenario_definition_data(raw: dict[str, Any], *, context: str = "Scenar
     reserve_groups_raw = raw.get("reserve_groups", [])
     zones_raw = raw.get("zones", [])
     restrictions_raw = raw.get("deployment_restrictions", [])
+    air_package_inventories_raw = raw.get("air_package_inventories", [])
 
     if not sectors_raw or not isinstance(sectors_raw, list):
         raise ConfigError(f"{context}: 'sectors' must be a non-empty array of tables.")
@@ -147,6 +149,7 @@ def load_scenario_definition_data(raw: dict[str, Any], *, context: str = "Scenar
     reserve_groups = tuple(_parse_reserve_group(item, context) for item in reserve_groups_raw)
     zones = tuple(_parse_zone(item, context) for item in zones_raw)
     restrictions = tuple(_parse_restriction(item, context) for item in restrictions_raw)
+    air_package_inventories = tuple(_parse_air_package_inventory(item, context) for item in air_package_inventories_raw)
 
     sector_ids = {sector.id for sector in sectors}
     coalition_ids = {coalition.coalition for coalition in coalitions}
@@ -188,6 +191,17 @@ def load_scenario_definition_data(raw: dict[str, Any], *, context: str = "Scenar
         if zone.sector_id not in sector_ids:
             raise ConfigError(f"{context}: zone '{zone.id}' references unknown sector '{zone.sector_id}'.")
 
+    control_point_ids = {control_point.id for control_point in control_points}
+    for inventory in air_package_inventories:
+        if inventory.coalition not in coalition_ids:
+            raise ConfigError(
+                f"{context}: air package inventory '{inventory.id}' references unknown coalition '{inventory.coalition}'."
+            )
+        if inventory.origin_control_point_id not in control_point_ids:
+            raise ConfigError(
+                f"{context}: air package inventory '{inventory.id}' references unknown control point '{inventory.origin_control_point_id}'."
+            )
+
     return ScenarioDefinition(
         id=_require_non_empty_string(raw, "id", context),
         version=_require_non_empty_string(raw, "version", context),
@@ -201,6 +215,7 @@ def load_scenario_definition_data(raw: dict[str, Any], *, context: str = "Scenar
         reserve_groups=reserve_groups,
         zones=zones,
         deployment_restrictions=restrictions,
+        air_package_inventories=air_package_inventories,
     )
 
 
@@ -297,6 +312,19 @@ def scenario_definition_to_dict(scenario: ScenarioDefinition) -> dict[str, Any]:
                 "tags": list(zone.tags),
             }
             for zone in scenario.zones
+        ],
+        "air_package_inventories": [
+            {
+                "id": item.id,
+                "coalition": item.coalition.value,
+                "origin_control_point_id": item.origin_control_point_id,
+                "aircraft_type": item.aircraft_type,
+                "aircraft_category": item.aircraft_category,
+                "available_count": item.available_count,
+                "package_types": list(item.package_types),
+                "default_altitude_ft_msl": item.default_altitude_ft_msl,
+            }
+            for item in scenario.air_package_inventories
         ],
         "deployment_restrictions": [
             {
@@ -512,4 +540,25 @@ def _parse_zone(data: dict[str, Any], context: str) -> ScenarioZone:
         center_lng=float(center_lng),
         radius_nm=float(radius_nm),
         tags=_optional_string_list(data, "tags", context),
+    )
+
+
+def _parse_air_package_inventory(data: dict[str, Any], context: str) -> AirPackageInventoryState:
+    if not isinstance(data, dict):
+        raise ConfigError(f"{context}: air package inventory entries must be tables.")
+    available_count = data.get("available_count")
+    if not isinstance(available_count, int) or available_count < 0:
+        raise ConfigError(f"{context}: air package inventory 'available_count' must be a non-negative integer.")
+    default_altitude = data.get("default_altitude_ft_msl")
+    if default_altitude is not None and (not isinstance(default_altitude, int) or default_altitude < 0):
+        raise ConfigError(f"{context}: air package inventory 'default_altitude_ft_msl' must be a non-negative integer.")
+    return AirPackageInventoryState(
+        id=_require_non_empty_string(data, "id", context),
+        coalition=Coalition(_require_non_empty_string(data, "coalition", context)),
+        origin_control_point_id=_require_non_empty_string(data, "origin_control_point_id", context),
+        aircraft_type=_require_non_empty_string(data, "aircraft_type", context),
+        aircraft_category=_require_non_empty_string(data, "aircraft_category", context),
+        available_count=available_count,
+        package_types=_optional_string_list(data, "package_types", context),
+        default_altitude_ft_msl=default_altitude,
     )

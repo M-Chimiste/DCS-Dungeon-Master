@@ -9,9 +9,12 @@ import json
 from pathlib import Path
 from typing import Any
 
-from dcs_dungeon_master.core.config import MultimodalConfig
+import base64
+
+from dcs_dungeon_master.core.config import AirOpsConfig, MultimodalConfig
 from dcs_dungeon_master.core.enums import Coalition, ConfidenceBand
 from dcs_dungeon_master.core.models import (
+    AirPackageState,
     CommanderObservation,
     CommanderStateView,
     EnemyContactEntry,
@@ -29,8 +32,10 @@ from dcs_dungeon_master.core.models import (
     SectorSummaryEntry,
 )
 from dcs_dungeon_master.core.versions import OBSERVATION_SCHEMA_VERSION
+from dcs_dungeon_master.map_assets import MapAssetService, TheaterAssetBundle
 from dcs_dungeon_master.persistence import SQLiteStateStore
 from dcs_dungeon_master.sensor_fusion import SensorFusionService
+from dcs_dungeon_master.terrain import TerrainService
 
 
 @dataclass(slots=True)
@@ -39,6 +44,9 @@ class ObservationBuilder:
     scenario: ScenarioDefinition
     sensor_fusion: SensorFusionService
     multimodal: MultimodalConfig = MultimodalConfig()
+    map_asset_service: MapAssetService | None = None
+    terrain_service: TerrainService | None = None
+    air_ops: AirOpsConfig = AirOpsConfig()
 
     @property
     def status(self) -> str:
@@ -68,7 +76,12 @@ class ObservationBuilder:
         coalition_state = next(item for item in self.store.get_coalition_states(run_id) if item.coalition is coalition)
         active_groups = tuple(item for item in self.store.get_active_groups(run_id) if item.coalition is coalition)
         reserve_groups = self.store.get_reserve_groups(run_id, coalition)
+        air_packages = self.store.list_air_packages(run_id, coalition)
         previous_artifact = self.store.get_previous_observation(run_id, coalition, decision_cycle)
+        asset_bundle = self.map_asset_service.bundle_for_theater(self.scenario.theater) if self.map_asset_service is not None else None
+        terrain_summary = self.terrain_service.sector_terrain_summary(asset_bundle, self.scenario.sectors) if self.terrain_service is not None else ()
+        landmarks = tuple(asset_bundle.landmarks) if asset_bundle is not None else ()
+        map_context = self._build_map_context(asset_bundle, coalition)
 
         sector_summary = self._build_sector_summary(world, knowledge, coalition, previous_artifact)
         base_observation = CommanderObservation(
@@ -82,10 +95,14 @@ class ObservationBuilder:
             ),
             commander_state=self._build_commander_state(coalition_state, active_groups),
             scenario_state=self._build_scenario_state(world, coalition, sector_summary),
-            resource_state=self._build_resource_state(coalition_state, reserve_groups, coalition),
+            resource_state=self._build_resource_state(run_id, coalition_state, reserve_groups, coalition),
             sector_summary=sector_summary,
             friendly_forces=self._build_friendly_forces(active_groups, world),
             enemy_contacts=self._build_enemy_contacts(knowledge),
+            air_packages=tuple(self._serialize_air_package(item) for item in air_packages),
+            map_context=map_context,
+            terrain_summary=terrain_summary,
+            landmarks=landmarks,
             recent_changes=(),
             standing_orders=tuple(order.text for order in coalition_state.standing_orders if order.active),
             requests_for_decision=(),
@@ -107,6 +124,10 @@ class ObservationBuilder:
             sector_summary=observation.sector_summary,
             friendly_forces=observation.friendly_forces,
             enemy_contacts=observation.enemy_contacts,
+            air_packages=observation.air_packages,
+            map_context=observation.map_context,
+            terrain_summary=observation.terrain_summary,
+            landmarks=observation.landmarks,
             recent_changes=observation.recent_changes,
             standing_orders=observation.standing_orders,
             requests_for_decision=observation.requests_for_decision,
@@ -322,7 +343,19 @@ class ObservationBuilder:
             front_status=front_status,
         )
 
-    def _build_resource_state(self, coalition_state, reserve_groups, coalition: Coalition) -> ResourceStateView:
+    def _build_resource_state(self, run_id: str, coalition_state, reserve_groups, coalition: Coalition) -> ResourceStateView:
+        air_package_inventories = tuple(
+            {
+                "id": inventory.id,
+                "origin_control_point_id": inventory.origin_control_point_id,
+                "aircraft_type": inventory.aircraft_type,
+                "aircraft_category": inventory.aircraft_category,
+                "available_count": inventory.available_count,
+                "package_types": inventory.package_types,
+                "default_altitude_ft_msl": inventory.default_altitude_ft_msl,
+            }
+            for inventory in self.store.get_air_package_inventories(run_id, coalition)
+        )
         available_reserves = tuple(
             ReserveAvailabilityView(
                 id=reserve.id,
@@ -346,6 +379,7 @@ class ObservationBuilder:
         return ResourceStateView(
             deployment_budget_remaining=coalition_state.budget_remaining,
             available_reserves=available_reserves,
+            air_package_inventories=air_package_inventories,
             restrictions=restrictions,
             key_shortages=tuple(shortages),
             recently_lost_assets=(),
@@ -422,6 +456,11 @@ class ObservationBuilder:
                     task=group.posture.value,
                     mobility="mobile" if group.mobile else "static",
                     health_band=health_band,
+                    category=world_group.category if world_group else None,
+                    control_point_id=group.control_point_id,
+                    altitude_ft_msl=world_group.alt if world_group else None,
+                    heading_deg=world_group.heading if world_group else None,
+                    speed_kts=world_group.speed if world_group else None,
                     high_value=bool(world_group.high_value) if world_group else ("air_defense" in group.group_type or "fires" in group.group_type),
                 )
             )
@@ -460,6 +499,10 @@ class ObservationBuilder:
             sector_summary=observation.sector_summary,
             friendly_forces=observation.friendly_forces,
             enemy_contacts=observation.enemy_contacts,
+            air_packages=observation.air_packages,
+            map_context=observation.map_context,
+            terrain_summary=observation.terrain_summary,
+            landmarks=observation.landmarks,
             recent_changes=recent_changes,
             standing_orders=observation.standing_orders,
             requests_for_decision=requests,
@@ -479,9 +522,10 @@ class ObservationBuilder:
             return ()
         output_dir = Path(self.multimodal.output_dir) / run_id / coalition.value
         output_dir.mkdir(parents=True, exist_ok=True)
-        output_path = output_dir / f"cycle_{decision_cycle:04d}_map_overlay.svg"
-        output_path.write_text(self._render_overlay_svg(observation), encoding="utf-8")
-        return (
+        attachments: list[ObservationAttachmentArtifact] = []
+        overlay_path = output_dir / f"cycle_{decision_cycle:04d}_map_overlay.svg"
+        overlay_path.write_text(self._render_overlay_svg(observation), encoding="utf-8")
+        attachments.append(
             ObservationAttachmentArtifact(
                 attachment_id=f"{coalition.value}_map_overlay_cycle_{decision_cycle}",
                 run_id=run_id,
@@ -489,15 +533,61 @@ class ObservationBuilder:
                 decision_cycle=decision_cycle,
                 media_type="image/svg+xml",
                 role="map_overlay",
-                file_path=str(output_path),
+                file_path=str(overlay_path),
                 submitted_to_backend=submit_to_backend,
                 metadata={
                     "multimodal_enabled": True,
                     "coalition": coalition.value,
                     "phase": "image_only",
                 },
-            ),
+            )
         )
+        asset_bundle = self.map_asset_service.bundle_for_theater(self.scenario.theater) if self.map_asset_service is not None else None
+        if asset_bundle is not None:
+            theater_path = output_dir / f"cycle_{decision_cycle:04d}_theater_map.svg"
+            theater_path.write_text(
+                self._render_basemap_svg(observation, asset_bundle, title=f"{coalition.value.upper()} theater context"),
+                encoding="utf-8",
+            )
+            attachments.append(
+                ObservationAttachmentArtifact(
+                    attachment_id=f"{coalition.value}_theater_map_cycle_{decision_cycle}",
+                    run_id=run_id,
+                    coalition=coalition,
+                    decision_cycle=decision_cycle,
+                    media_type="image/svg+xml",
+                    role="map_theater_context",
+                    file_path=str(theater_path),
+                    submitted_to_backend=submit_to_backend,
+                    metadata={"multimodal_enabled": True, "coalition": coalition.value, "phase": "image_plus_structured"},
+                )
+            )
+            front_bbox = self._front_focus_bbox()
+            if front_bbox is not None:
+                front_path = output_dir / f"cycle_{decision_cycle:04d}_front_aoi.svg"
+                front_path.write_text(
+                    self._render_basemap_svg(
+                        observation,
+                        asset_bundle,
+                        focus_bbox=front_bbox,
+                        title=f"{coalition.value.upper()} front AOI",
+                    ),
+                    encoding="utf-8",
+                )
+                attachments.append(
+                    ObservationAttachmentArtifact(
+                        attachment_id=f"{coalition.value}_front_aoi_cycle_{decision_cycle}",
+                        run_id=run_id,
+                        coalition=coalition,
+                        decision_cycle=decision_cycle,
+                        media_type="image/svg+xml",
+                        role="map_front_aoi",
+                        file_path=str(front_path),
+                        submitted_to_backend=submit_to_backend,
+                        metadata={"multimodal_enabled": True, "coalition": coalition.value, "phase": "image_plus_structured"},
+                    )
+                )
+        return tuple(attachments)
 
     def _render_overlay_svg(self, observation: CommanderObservation) -> str:
         sectors = sorted(self.scenario.sectors, key=lambda item: item.id)
@@ -547,6 +637,131 @@ class ObservationBuilder:
             f'{"".join(circles)}{"".join(friendlies)}{"".join(contacts)}{"".join(labels)}'
             "</svg>"
         )
+
+    def _build_map_context(self, asset_bundle: TheaterAssetBundle | None, coalition: Coalition) -> dict[str, Any]:
+        basemap = None
+        if asset_bundle is not None and self.map_asset_service is not None:
+            basemap_path = asset_bundle.basemap_manifest_path.parent / str(asset_bundle.basemap.get("image_path", ""))
+            basemap = {
+                **asset_bundle.basemap,
+                "image_url": self.map_asset_service.public_url_for_path(basemap_path),
+                "image_path": str(basemap_path),
+            }
+        return {
+            "theater": self.scenario.theater,
+            "coalition": coalition.value,
+            "terrain_available": asset_bundle is not None and self.terrain_service is not None,
+            "basemap": basemap,
+            "recommended_image_roles": ["map_theater_context", "map_front_aoi", "map_overlay"],
+            "water_context": [
+                landmark["name"]
+                for landmark in (asset_bundle.landmarks if asset_bundle is not None else ())
+                if "water" in set(landmark.get("tags", ()))
+            ][:3],
+        }
+
+    @staticmethod
+    def _serialize_air_package(package: AirPackageState) -> dict[str, Any]:
+        return {
+            "package_id": package.package_id,
+            "package_type": package.package_type,
+            "aircraft_type": package.aircraft_type,
+            "aircraft_category": package.aircraft_category,
+            "aircraft_count": package.aircraft_count,
+            "origin_control_point_id": package.origin_control_point_id,
+            "status": package.status,
+            "posture": package.posture,
+            "roe": package.roe,
+            "target_reference_type": package.target_reference_type,
+            "target_reference_id": package.target_reference_id,
+            "current_sector_id": package.current_sector_id,
+            "route_legs": tuple(asdict(leg) for leg in package.route_legs),
+            "normalized_route_legs": tuple(asdict(leg) for leg in package.normalized_route_legs),
+            "metadata": package.metadata,
+        }
+
+    def _render_basemap_svg(
+        self,
+        observation: CommanderObservation,
+        asset_bundle: TheaterAssetBundle,
+        *,
+        focus_bbox: tuple[float, float, float, float] | None = None,
+        title: str,
+    ) -> str:
+        width = 900
+        height = 560
+        basemap_path = asset_bundle.basemap_manifest_path.parent / str(asset_bundle.basemap.get("image_path", ""))
+        media_type = str(asset_bundle.basemap.get("media_type", "image/svg+xml"))
+        encoded_map = base64.b64encode(basemap_path.read_bytes()).decode("ascii")
+        bounds = asset_bundle.basemap.get("bounds", {})
+        west = float(bounds.get("west"))
+        east = float(bounds.get("east"))
+        south = float(bounds.get("south"))
+        north = float(bounds.get("north"))
+        if focus_bbox is not None:
+            south, west, north, east = focus_bbox
+        def project(lat: float, lng: float) -> tuple[float, float]:
+            x = ((lng - west) / max(east - west, 0.001)) * width
+            y = (1 - ((lat - south) / max(north - south, 0.001))) * height
+            return (x, y)
+        sector_summary = {item.sector_id: item for item in observation.sector_summary}
+        sectors = []
+        labels = []
+        for sector in self.scenario.sectors:
+            if sector.center_lat is None or sector.center_lng is None:
+                continue
+            x, y = project(sector.center_lat, sector.center_lng)
+            summary = sector_summary.get(sector.id)
+            fill = {
+                "friendly": "#4e9a51",
+                "enemy": "#c84f4f",
+                "contested": "#d89b2b",
+            }.get(summary.control_status if summary else "unknown", "#6b7280")
+            sectors.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="20" fill="{fill}" opacity="0.45" stroke="#111827" stroke-width="1" />')
+            labels.append(f'<text x="{x:.1f}" y="{y + 30:.1f}" text-anchor="middle" font-size="12" fill="#111827">{sector.name}</text>')
+        contacts = []
+        for contact in observation.enemy_contacts:
+            sector_id = contact.estimated_sector or contact.last_known_sector
+            sector = next((item for item in self.scenario.sectors if item.id == sector_id), None)
+            if sector is None or sector.center_lat is None or sector.center_lng is None:
+                continue
+            x, y = project(sector.center_lat, sector.center_lng)
+            contacts.append(f'<rect x="{x - 7:.1f}" y="{y - 7:.1f}" width="14" height="14" fill="#111827" />')
+        friendlies = []
+        for force in observation.friendly_forces:
+            sector = next((item for item in self.scenario.sectors if item.id == force.assigned_sector), None)
+            if sector is None or sector.center_lat is None or sector.center_lng is None:
+                continue
+            x, y = project(sector.center_lat, sector.center_lng)
+            friendlies.append(f'<circle cx="{x:.1f}" cy="{y + 12:.1f}" r="6" fill="#f9fafb" stroke="#111827" stroke-width="1" />')
+        landmarks = []
+        for landmark in observation.landmarks[:10]:
+            lat = landmark.get("lat")
+            lng = landmark.get("lng")
+            if not isinstance(lat, int | float) or not isinstance(lng, int | float):
+                continue
+            x, y = project(float(lat), float(lng))
+            landmarks.append(f'<path d="M {x:.1f} {y - 10:.1f} L {x - 6:.1f} {y + 4:.1f} L {x + 6:.1f} {y + 4:.1f} Z" fill="#2563eb" />')
+        return (
+            f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">'
+            f'<rect width="{width}" height="{height}" fill="#e5e7eb" />'
+            f'<image href="data:{media_type};base64,{encoded_map}" x="0" y="0" width="{width}" height="{height}" preserveAspectRatio="none" />'
+            f'<rect x="0" y="0" width="{width}" height="42" fill="rgba(255,255,255,0.8)" />'
+            f'<text x="24" y="28" font-size="20" fill="#111827">{title}</text>'
+            f'{"".join(sectors)}{"".join(friendlies)}{"".join(contacts)}{"".join(landmarks)}{"".join(labels)}'
+            "</svg>"
+        )
+
+    def _front_focus_bbox(self) -> tuple[float, float, float, float] | None:
+        front_sectors = [
+            sector for sector in self.scenario.sectors
+            if sector.role in {"front", "contested", "air_corridor"} and sector.center_lat is not None and sector.center_lng is not None
+        ]
+        if not front_sectors:
+            return None
+        lats = [float(sector.center_lat) for sector in front_sectors]
+        lngs = [float(sector.center_lng) for sector in front_sectors]
+        return (min(lats) - 0.6, min(lngs) - 0.8, max(lats) + 0.6, max(lngs) + 0.8)
 
     def _recent_changes(
         self,

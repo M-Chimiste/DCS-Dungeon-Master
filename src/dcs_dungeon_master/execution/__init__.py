@@ -23,6 +23,8 @@ from dcs_dungeon_master.core.enums import (
 from dcs_dungeon_master.core.models import (
     ActiveGroupState,
     ActionValidationBatch,
+    AirPackageState,
+    AirRouteLeg,
     DecisionCycleResult,
     ExecutionBatchResult,
     ExecutionCapabilityMap,
@@ -516,6 +518,276 @@ class ExecutionEngine:
                 now,
                 posture=GroupPosture.FALLBACK,
             )
+        if action_type == ActionType.LAUNCH_AIR_PACKAGE:
+            inventory = next(
+                item for item in self.store.get_air_package_inventories(run_id, coalition) if item.id == params["inventory_id"]
+            )
+            package_id = f"package_{coalition.value}_{action_id}"
+            normalized_route_legs = tuple(self._air_route_legs(params["route_legs"]))
+            current_sector_id = self._sector_id_from_route_legs(normalized_route_legs) or inventory.origin_control_point_id
+            package = AirPackageState(
+                package_id=package_id,
+                coalition=coalition,
+                package_type=params["package_type"],
+                aircraft_type=inventory.aircraft_type,
+                aircraft_category=inventory.aircraft_category,
+                aircraft_count=params["aircraft_count"],
+                origin_control_point_id=inventory.origin_control_point_id,
+                status="active",
+                posture=params["posture"],
+                roe=params["roe"],
+                target_reference_type=params.get("target_reference_type"),
+                target_reference_id=params.get("target_reference_id"),
+                route_legs=normalized_route_legs,
+                normalized_route_legs=normalized_route_legs,
+                current_sector_id=self._control_point_by_id[inventory.origin_control_point_id].sector_id if current_sector_id == inventory.origin_control_point_id else current_sector_id,
+                last_updated_at=now,
+                metadata={
+                    "launch_action_id": action_id,
+                    "normalized_by_validator": True,
+                },
+            )
+            command = self._build_command(
+                f"{action_id}_launch",
+                "/olympus/commands/air-packages/launch",
+                {
+                    "coalition": coalition.value,
+                    "package_id": package_id,
+                    "inventory_id": inventory.id,
+                    "package_type": params["package_type"],
+                    "aircraft_type": inventory.aircraft_type,
+                    "aircraft_count": params["aircraft_count"],
+                    "origin_control_point_id": inventory.origin_control_point_id,
+                    "posture": params["posture"],
+                    "roe": params["roe"],
+                    "target_reference_type": params.get("target_reference_type"),
+                    "target_reference_id": params.get("target_reference_id"),
+                    "route_legs": [asdict(leg) for leg in normalized_route_legs],
+                },
+            )
+            order = self._standing_order(
+                run_id,
+                coalition,
+                action_type,
+                "air_package",
+                package_id,
+                f"Launch {params['package_type']} package {package_id} from {inventory.origin_control_point_id}.",
+                {**params, "package_id": package_id},
+                now,
+            )
+            return ExecutionPlan(
+                action_id=action_id,
+                coalition=coalition,
+                action_type=action_type,
+                commands=(command,),
+                standing_orders=(order,),
+                resulting_entities=(package_id,),
+                state_updates={
+                    "air_package_inventories": (
+                        {
+                            "inventory_id": inventory.id,
+                            "available_count": max(0, inventory.available_count - params["aircraft_count"]),
+                        },
+                    ),
+                    "air_packages": (asdict(package),),
+                },
+                summary=f"Air package {package_id} launched from {inventory.origin_control_point_id}.",
+            )
+        if action_type == ActionType.RETASK_AIR_PACKAGE:
+            package = next(item for item in self.store.list_air_packages(run_id, coalition) if item.package_id == params["package_id"])
+            normalized_route_legs = tuple(self._air_route_legs(params["route_legs"]))
+            updated_package = AirPackageState(
+                package_id=package.package_id,
+                coalition=package.coalition,
+                package_type=package.package_type,
+                aircraft_type=package.aircraft_type,
+                aircraft_category=package.aircraft_category,
+                aircraft_count=package.aircraft_count,
+                origin_control_point_id=package.origin_control_point_id,
+                status=package.status,
+                posture=package.posture,
+                roe=package.roe,
+                target_reference_type=params.get("target_reference_type") or package.target_reference_type,
+                target_reference_id=params.get("target_reference_id") or package.target_reference_id,
+                route_legs=normalized_route_legs,
+                normalized_route_legs=normalized_route_legs,
+                current_sector_id=self._sector_id_from_route_legs(normalized_route_legs) or package.current_sector_id,
+                last_updated_at=now,
+                metadata={**package.metadata, "retask_action_id": action_id},
+            )
+            command = self._build_command(
+                f"{action_id}_retask",
+                "/olympus/commands/air-packages/retask",
+                {
+                    "coalition": coalition.value,
+                    "package_id": package.package_id,
+                    "route_legs": [asdict(leg) for leg in normalized_route_legs],
+                    "target_reference_type": updated_package.target_reference_type,
+                    "target_reference_id": updated_package.target_reference_id,
+                },
+            )
+            order = self._standing_order(
+                run_id,
+                coalition,
+                action_type,
+                "air_package",
+                package.package_id,
+                f"Retask air package {package.package_id}.",
+                params,
+                now,
+            )
+            return ExecutionPlan(
+                action_id=action_id,
+                coalition=coalition,
+                action_type=action_type,
+                commands=(command,),
+                standing_orders=(order,),
+                resulting_entities=(package.package_id,),
+                state_updates={"air_packages": (asdict(updated_package),)},
+                summary=f"Air package {package.package_id} retasked.",
+            )
+        if action_type == ActionType.ABORT_AIR_PACKAGE:
+            package = next(item for item in self.store.list_air_packages(run_id, coalition) if item.package_id == params["package_id"])
+            updated_package = AirPackageState(
+                package_id=package.package_id,
+                coalition=package.coalition,
+                package_type=package.package_type,
+                aircraft_type=package.aircraft_type,
+                aircraft_category=package.aircraft_category,
+                aircraft_count=package.aircraft_count,
+                origin_control_point_id=package.origin_control_point_id,
+                status="aborted",
+                posture="egress",
+                roe=package.roe,
+                target_reference_type=package.target_reference_type,
+                target_reference_id=package.target_reference_id,
+                route_legs=package.route_legs,
+                normalized_route_legs=package.normalized_route_legs,
+                current_sector_id=package.current_sector_id,
+                last_updated_at=now,
+                metadata={**package.metadata, "abort_reason": params["abort_reason"], "abort_action_id": action_id},
+            )
+            command = self._build_command(
+                f"{action_id}_abort",
+                "/olympus/commands/air-packages/abort",
+                {
+                    "coalition": coalition.value,
+                    "package_id": package.package_id,
+                    "abort_reason": params["abort_reason"],
+                },
+            )
+            order = self._standing_order(
+                run_id,
+                coalition,
+                action_type,
+                "air_package",
+                package.package_id,
+                f"Abort air package {package.package_id}.",
+                params,
+                now,
+            )
+            return ExecutionPlan(
+                action_id=action_id,
+                coalition=coalition,
+                action_type=action_type,
+                commands=(command,),
+                standing_orders=(order,),
+                resulting_entities=(package.package_id,),
+                state_updates={"air_packages": (asdict(updated_package),)},
+                summary=f"Air package {package.package_id} aborted.",
+            )
+        if action_type == ActionType.SET_AIR_PACKAGE_POSTURE:
+            package = next(item for item in self.store.list_air_packages(run_id, coalition) if item.package_id == params["package_id"])
+            updated_package = AirPackageState(
+                package_id=package.package_id,
+                coalition=package.coalition,
+                package_type=package.package_type,
+                aircraft_type=package.aircraft_type,
+                aircraft_category=package.aircraft_category,
+                aircraft_count=package.aircraft_count,
+                origin_control_point_id=package.origin_control_point_id,
+                status=package.status,
+                posture=params["posture"],
+                roe=package.roe,
+                target_reference_type=package.target_reference_type,
+                target_reference_id=package.target_reference_id,
+                route_legs=package.route_legs,
+                normalized_route_legs=package.normalized_route_legs,
+                current_sector_id=package.current_sector_id,
+                last_updated_at=now,
+                metadata={**package.metadata, "posture_action_id": action_id},
+            )
+            command = self._build_command(
+                f"{action_id}_posture",
+                "/olympus/commands/air-packages/posture",
+                {"coalition": coalition.value, "package_id": package.package_id, "posture": params["posture"]},
+            )
+            order = self._standing_order(
+                run_id,
+                coalition,
+                action_type,
+                "air_package",
+                package.package_id,
+                f"Set air package {package.package_id} posture to {params['posture']}.",
+                params,
+                now,
+            )
+            return ExecutionPlan(
+                action_id=action_id,
+                coalition=coalition,
+                action_type=action_type,
+                commands=(command,),
+                standing_orders=(order,),
+                resulting_entities=(package.package_id,),
+                state_updates={"air_packages": (asdict(updated_package),)},
+                summary=f"Air package {package.package_id} posture updated to {params['posture']}.",
+            )
+        if action_type == ActionType.SET_AIR_PACKAGE_ROE:
+            package = next(item for item in self.store.list_air_packages(run_id, coalition) if item.package_id == params["package_id"])
+            updated_package = AirPackageState(
+                package_id=package.package_id,
+                coalition=package.coalition,
+                package_type=package.package_type,
+                aircraft_type=package.aircraft_type,
+                aircraft_category=package.aircraft_category,
+                aircraft_count=package.aircraft_count,
+                origin_control_point_id=package.origin_control_point_id,
+                status=package.status,
+                posture=package.posture,
+                roe=params["roe"],
+                target_reference_type=package.target_reference_type,
+                target_reference_id=package.target_reference_id,
+                route_legs=package.route_legs,
+                normalized_route_legs=package.normalized_route_legs,
+                current_sector_id=package.current_sector_id,
+                last_updated_at=now,
+                metadata={**package.metadata, "roe_action_id": action_id},
+            )
+            command = self._build_command(
+                f"{action_id}_roe",
+                "/olympus/commands/air-packages/roe",
+                {"coalition": coalition.value, "package_id": package.package_id, "roe": params["roe"]},
+            )
+            order = self._standing_order(
+                run_id,
+                coalition,
+                action_type,
+                "air_package",
+                package.package_id,
+                f"Set air package {package.package_id} ROE to {params['roe']}.",
+                params,
+                now,
+            )
+            return ExecutionPlan(
+                action_id=action_id,
+                coalition=coalition,
+                action_type=action_type,
+                commands=(command,),
+                standing_orders=(order,),
+                resulting_entities=(package.package_id,),
+                state_updates={"air_packages": (asdict(updated_package),)},
+                summary=f"Air package {package.package_id} ROE updated to {params['roe']}.",
+            )
         return ExecutionPlan(action_id=action_id, coalition=coalition, action_type=action_type)
 
     def _movement_plan(
@@ -707,6 +979,58 @@ class ExecutionEngine:
 
     def _resolve_sector(self, sector_id: str):
         return self._sector_by_id[sector_id]
+
+    @staticmethod
+    def _air_route_legs(value: list[dict[str, Any]]) -> tuple[AirRouteLeg, ...]:
+        return tuple(
+            AirRouteLeg(
+                leg_id=str(item["leg_id"]),
+                reference_type=str(item["reference_type"]),
+                reference_id=item.get("reference_id"),
+                lat=float(item["lat"]) if isinstance(item.get("lat"), int | float) else None,
+                lng=float(item["lng"]) if isinstance(item.get("lng"), int | float) else None,
+                altitude_ft_msl=int(item["altitude_ft_msl"]) if item.get("altitude_ft_msl") is not None else None,
+                task=item.get("task"),
+                note=item.get("note"),
+                metadata={
+                    key: payload
+                    for key, payload in {
+                        "max_terrain_ft_msl": item.get("max_terrain_ft_msl"),
+                        **(item.get("metadata", {}) if isinstance(item.get("metadata"), dict) else {}),
+                    }.items()
+                    if payload is not None
+                },
+            )
+            for item in value
+        )
+
+    def _sector_id_from_route_legs(self, legs: tuple[AirRouteLeg, ...]) -> str | None:
+        if not legs:
+            return None
+        last_leg = legs[-1]
+        if last_leg.reference_type == "sector" and last_leg.reference_id:
+            return last_leg.reference_id
+        if last_leg.reference_type == "control_point" and last_leg.reference_id:
+            control_point = self._control_point_by_id.get(last_leg.reference_id)
+            return control_point.sector_id if control_point is not None else None
+        if last_leg.reference_type == "zone" and last_leg.reference_id:
+            zone = self._zone_by_id.get(last_leg.reference_id)
+            return zone.sector_id if zone is not None else None
+        if isinstance(last_leg.lat, float) and isinstance(last_leg.lng, float):
+            return self._nearest_sector_id(last_leg.lat, last_leg.lng)
+        return None
+
+    def _nearest_sector_id(self, lat: float, lng: float) -> str | None:
+        best_sector_id: str | None = None
+        best_score: float | None = None
+        for sector in self.scenario.sectors:
+            if sector.center_lat is None or sector.center_lng is None:
+                continue
+            score = ((sector.center_lat - lat) ** 2) + ((sector.center_lng - lng) ** 2)
+            if best_score is None or score < best_score:
+                best_score = score
+                best_sector_id = sector.id
+        return best_sector_id
 
     def _standing_order(
         self,

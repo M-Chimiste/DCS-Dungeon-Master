@@ -48,6 +48,8 @@ Phase 1 assumptions:
 - Optional multimodal support is implemented as a backend-gated image attachment path. Structured JSON remains authoritative even when an attachment is submitted alongside the canonical observation.
 - Backend failover is implemented as one primary backend plus one optional fallback backend per coalition. Failover is only used for transport or parse failure and reuses the same observation snapshot.
 - Action validation is constrained to scenario-known, coalition-owned, and coalition-visible data. Hidden world truth is not part of legality decisions.
+- A local theater asset pipeline may provide basemap imagery, landmarks, and elevation manifests. These assets are served by the harness and are not pulled from Olympus UI tiles at runtime.
+- Air Ops v1 uses package-first air actions with terrain-aware altitude normalization at validation time and Olympus translation only at the execution boundary.
 
 ## System Context
 
@@ -154,6 +156,7 @@ Responsibilities:
 - Build one observation for BLUFOR
 - Summarize sectors, friendly groups, enemy contacts, and deltas
 - Include coalition-private standing orders and resource state
+- Optionally include coalition-filtered map context, landmarks, terrain summaries, and generated map images
 - Keep payloads concise and stable across runs
 
 Outputs:
@@ -189,6 +192,7 @@ Responsibilities:
 - Validate coalition ownership and entity references
 - Validate scenario legality and routing rules
 - Validate budgets, reserve availability, and current state
+- Normalize terrain-unsafe air route legs upward when the route is otherwise legal
 - Reject or partially accept action batches with machine-readable reasons
 
 This is the second major trust boundary after fog-of-war filtering.
@@ -203,6 +207,7 @@ Responsibilities:
 - Handle route generation, activation, posture changes, and movement
 - Maintain standing orders between LLM decision cycles
 - Apply deterministic tactical handling between strategic decisions
+- Expand accepted air packages into bounded Olympus air-package commands while persisting normalized routes for replay
 
 Examples:
 

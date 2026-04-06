@@ -141,6 +141,28 @@ class MultimodalConfig:
 
 
 @dataclass(slots=True, frozen=True)
+class TheaterAssetManifestConfig:
+    theater_name: str
+    basemap_manifest: str
+    elevation_manifest: str
+    landmarks_manifest: str
+
+
+@dataclass(slots=True, frozen=True)
+class MapAssetsConfig:
+    asset_root: str = ".cache/dcs-dungeon-master/map-assets"
+    theaters: dict[str, TheaterAssetManifestConfig] = field(default_factory=dict)
+
+
+@dataclass(slots=True, frozen=True)
+class AirOpsConfig:
+    enabled: bool = False
+    fixed_wing_clearance_ft: int = 2000
+    helicopter_clearance_ft: int = 500
+    terrain_sample_nm: int = 2
+
+
+@dataclass(slots=True, frozen=True)
 class SetupConfig:
     saved_games_path: str | None = None
 
@@ -186,6 +208,8 @@ class AppConfig:
     dry_run: DryRunConfig = field(default_factory=lambda: DryRunConfig(enabled=True))
     fog_of_war: FogOfWarConfig = field(default_factory=FogOfWarConfig)
     multimodal: MultimodalConfig = field(default_factory=MultimodalConfig)
+    map_assets: MapAssetsConfig = field(default_factory=MapAssetsConfig)
+    air_ops: AirOpsConfig = field(default_factory=AirOpsConfig)
     setup: SetupConfig = field(default_factory=SetupConfig)
     evaluation: EvaluationProfileConfig = field(default_factory=EvaluationProfileConfig)
 
@@ -316,6 +340,16 @@ def load_config(path: str | Path) -> AppConfig:
         multimodal = {}
     if not isinstance(multimodal, dict):
         raise ConfigError("Config section 'multimodal' must be a table when provided.")
+    map_assets = raw.get("map_assets", {})
+    if map_assets is None:
+        map_assets = {}
+    if not isinstance(map_assets, dict):
+        raise ConfigError("Config section 'map_assets' must be a table when provided.")
+    air_ops = raw.get("air_ops", {})
+    if air_ops is None:
+        air_ops = {}
+    if not isinstance(air_ops, dict):
+        raise ConfigError("Config section 'air_ops' must be a table when provided.")
     setup = raw.get("setup", {})
     if setup is None:
         setup = {}
@@ -545,6 +579,21 @@ def load_config(path: str | Path) -> AppConfig:
             )
         )
 
+    theater_asset_configs: dict[str, TheaterAssetManifestConfig] = {}
+    theater_assets_raw = map_assets.get("theaters", {})
+    if theater_assets_raw is not None:
+        if not isinstance(theater_assets_raw, dict):
+            raise ConfigError("Config field 'map_assets.theaters' must be a table when provided.")
+        for theater_slug, item in theater_assets_raw.items():
+            if not isinstance(item, dict):
+                raise ConfigError(f"Config field 'map_assets.theaters.{theater_slug}' must be a table.")
+            theater_asset_configs[str(theater_slug)] = TheaterAssetManifestConfig(
+                theater_name=_require_str(item, "theater_name"),
+                basemap_manifest=_require_str(item, "basemap_manifest"),
+                elevation_manifest=_require_str(item, "elevation_manifest"),
+                landmarks_manifest=_require_str(item, "landmarks_manifest"),
+            )
+
     return AppConfig(
         runtime=RuntimeConfig(
             app_name=_require_str(runtime, "app_name"),
@@ -619,6 +668,16 @@ def load_config(path: str | Path) -> AppConfig:
         multimodal=MultimodalConfig(
             enabled=bool(multimodal.get("enabled", False)),
             output_dir=_optional_str(multimodal, "output_dir") or ".cache/dcs-dungeon-master/attachments",
+        ),
+        map_assets=MapAssetsConfig(
+            asset_root=_optional_str(map_assets, "asset_root") or ".cache/dcs-dungeon-master/map-assets",
+            theaters=theater_asset_configs,
+        ),
+        air_ops=AirOpsConfig(
+            enabled=bool(air_ops.get("enabled", False)),
+            fixed_wing_clearance_ft=_non_negative_int(air_ops, "fixed_wing_clearance_ft", 2000),
+            helicopter_clearance_ft=_non_negative_int(air_ops, "helicopter_clearance_ft", 500),
+            terrain_sample_nm=max(1, _non_negative_int(air_ops, "terrain_sample_nm", 2)),
         ),
         setup=SetupConfig(
             saved_games_path=_optional_str(setup, "saved_games_path"),

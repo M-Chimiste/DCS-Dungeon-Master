@@ -193,12 +193,14 @@ button:hover {
 .map-svg {
   width: 100%;
   height: auto;
+  overflow: hidden;
+  border-radius: 20px;
 }
 
 .sector-ring {
   stroke: #5d381d;
   stroke-width: 2;
-  fill-opacity: 0.5;
+  fill-opacity: 0.28;
   transition: transform 120ms ease, stroke-width 120ms ease, filter 120ms ease;
 }
 
@@ -247,6 +249,10 @@ button:hover {
 .marker-label {
   fill: #1f2937;
   font-size: 12px;
+  paint-order: stroke;
+  stroke: rgba(255, 250, 243, 0.78);
+  stroke-width: 3px;
+  stroke-linejoin: round;
 }
 
 .control-point {
@@ -260,6 +266,28 @@ button:hover {
   stroke: #5d381d;
   stroke-dasharray: 6 4;
   stroke-width: 1.5;
+}
+
+.terrain-halo {
+  fill: none;
+  stroke-width: 2;
+  opacity: 0.72;
+}
+
+.terrain-high {
+  stroke: rgba(146, 34, 34, 0.72);
+}
+
+.terrain-medium {
+  stroke: rgba(180, 83, 9, 0.68);
+}
+
+.terrain-low {
+  stroke: rgba(37, 99, 235, 0.42);
+}
+
+.terrain-label {
+  font-size: 11px;
 }
 
 .world-group {
@@ -305,6 +333,50 @@ button:hover {
   fill: #111827;
 }
 
+.landmark-mark {
+  fill: #2563eb;
+  stroke: rgba(255, 255, 255, 0.78);
+  stroke-width: 1;
+}
+
+.air-package-route {
+  fill: none;
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 12 8;
+  opacity: 0.95;
+}
+
+.air-package-route.red {
+  stroke: #8c2f39;
+}
+
+.air-package-route.blue {
+  stroke: #1d4ed8;
+}
+
+.air-package-route.unknown {
+  stroke: #374151;
+}
+
+.air-package-node {
+  stroke: #fffdf8;
+  stroke-width: 2;
+}
+
+.air-package-node.red {
+  fill: #8c2f39;
+}
+
+.air-package-node.blue {
+  fill: #1d4ed8;
+}
+
+.air-package-node.unknown {
+  fill: #374151;
+}
+
 label {
   display: flex;
   flex-direction: column;
@@ -329,6 +401,20 @@ select {
 
 .preview-panel p {
   margin-top: 0;
+}
+
+.preview-image-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.75rem;
+  margin-top: 0.9rem;
+}
+
+.preview-image-grid img {
+  width: 100%;
+  border-radius: 12px;
+  border: 1px solid rgba(114, 84, 58, 0.18);
+  background: rgba(255, 250, 243, 0.74);
 }
 
 .summary-grid {

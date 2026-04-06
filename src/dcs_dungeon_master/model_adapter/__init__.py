@@ -43,8 +43,10 @@ _SYSTEM_PROMPTS = {
         "You are a DCS strategic coalition commander. "
         "You must respond with JSON only. "
         "Return exactly one JSON object with an 'actions' array. "
-        "Use only the allowed Phase 1 action types and stay within the supplied observation. "
+        "Use only the allowed action types and stay within the supplied observation. "
         "Do not invent hidden enemy facts or unsupported entities. "
+        "When air package actions are allowed, use the supplied structured terrain, basemap, landmark, and asset data. "
+        "For air route legs, provide explicit altitude_ft_msl values and prefer known sectors, control points, zones, landmarks, or coalition-visible contacts. "
         "If no change is needed, return {'actions': []} or include a valid hold_action in that array."
     ),
 }
@@ -542,6 +544,22 @@ class DryDecisionLoopRunner:
 
     def _action_batch_json_schema(self) -> dict[str, Any]:
         action_types = [action_type.value for action_type in ActionType]
+        route_leg_schema: dict[str, Any] = {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "leg_id": {"type": "string"},
+                "reference_type": {"type": "string", "enum": ["sector", "control_point", "zone", "landmark", "coordinate"]},
+                "reference_id": {"type": "string"},
+                "lat": {"type": "number"},
+                "lng": {"type": "number"},
+                "altitude_ft_msl": {"type": "integer", "minimum": 0},
+                "task": {"type": "string"},
+                "note": {"type": "string"},
+                "metadata": {"type": "object"},
+            },
+            "required": ["reference_type"],
+        }
         action_properties: dict[str, Any] = {
             "action_id": {"type": "string"},
             "action_type": {"type": "string", "enum": action_types},
@@ -562,6 +580,15 @@ class DryDecisionLoopRunner:
             "fallback_destination_id": {"type": "string"},
             "posture": {"type": "string"},
             "scope": {"type": "string"},
+            "inventory_id": {"type": "string"},
+            "package_id": {"type": "string"},
+            "package_type": {"type": "string"},
+            "aircraft_count": {"type": "integer", "minimum": 1},
+            "route_legs": {"type": "array", "items": route_leg_schema},
+            "target_reference_type": {"type": "string"},
+            "target_reference_id": {"type": "string"},
+            "roe": {"type": "string"},
+            "abort_reason": {"type": "string"},
         }
         return {
             "type": "object",

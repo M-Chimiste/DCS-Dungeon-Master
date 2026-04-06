@@ -6,6 +6,7 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Any
 
+from dcs_dungeon_master.core.config import AirOpsConfig
 from dcs_dungeon_master.core.enums import (
     ActionType,
     Coalition,
@@ -21,6 +22,7 @@ from dcs_dungeon_master.core.models import (
     ActionBatch,
     ActionValidationAuditEntry,
     ActionValidationAuditReport,
+    AirRouteLeg,
     ActionRequest,
     ActionValidationBatch,
     ActionValidationResult,
@@ -38,12 +40,18 @@ from dcs_dungeon_master.core.models import (
     ValidationMessage,
     WorldGroupState,
 )
+from dcs_dungeon_master.map_assets import MapAssetService
 from dcs_dungeon_master.persistence import SQLiteStateStore
+from dcs_dungeon_master.terrain import TerrainService
 
 
 _DEPLOY_ROLES = {"defensive", "screening", "support", "fires", "reserve"}
 _REINFORCEMENT_ROLES = {"defend", "screen", "support", "fallback_cover"}
 _HOLD_SCOPES = {"global", "sector", "group"}
+_AIR_PACKAGE_TYPES = {"cap", "strike", "sead", "escort", "transport"}
+_AIR_PACKAGE_POSTURES = {"push", "hold", "egress", "defensive"}
+_AIR_PACKAGE_ROE = {"tight", "hold", "free"}
+_AIR_ROUTE_REFERENCE_TYPES = {"sector", "control_point", "zone", "landmark", "coordinate"}
 _SOFT_NON_HOLD_CAP = 3
 _UNAVAILABLE_ACTIVE_STATUSES = {"destroyed", "withdrawn", "unavailable"}
 _UNAVAILABLE_RESERVE_STATUSES = {"committed", "unavailable", "depleted"}
@@ -99,10 +107,22 @@ class _Destination:
 class ActionValidator:
     """Validates Phase 1 action payloads against scenario and coalition state."""
 
-    def __init__(self, store: SQLiteStateStore, scenario: ScenarioDefinition, *, soft_non_hold_cap: int = _SOFT_NON_HOLD_CAP):
+    def __init__(
+        self,
+        store: SQLiteStateStore,
+        scenario: ScenarioDefinition,
+        *,
+        soft_non_hold_cap: int = _SOFT_NON_HOLD_CAP,
+        map_asset_service: MapAssetService | None = None,
+        terrain_service: TerrainService | None = None,
+        air_ops: AirOpsConfig = AirOpsConfig(),
+    ):
         self.store = store
         self.scenario = scenario
         self.soft_non_hold_cap = soft_non_hold_cap
+        self.map_asset_service = map_asset_service
+        self.terrain_service = terrain_service
+        self.air_ops = air_ops
         self._sector_by_id = {sector.id: sector for sector in scenario.sectors}
         self._control_point_by_id = {control_point.id: control_point for control_point in scenario.control_points}
         self._zone_by_id = {zone.id: zone for zone in scenario.zones}
@@ -509,6 +529,33 @@ class ActionValidator:
                 if scope == "group":
                     normalized["group_id"] = self._require_str(params, "group_id")
                 working.normalized_params = normalized
+            elif parsed.action_type == ActionType.LAUNCH_AIR_PACKAGE:
+                working.normalized_params = self._parse_launch_air_package(params)
+            elif parsed.action_type == ActionType.RETASK_AIR_PACKAGE:
+                package_id = self._require_str(params, "package_id")
+                working.normalized_params = {
+                    "package_id": package_id,
+                    "route_legs": self._parse_route_legs(params.get("route_legs")),
+                    "target_reference_type": self._optional_air_reference_type(params.get("target_reference_type")),
+                    "target_reference_id": params.get("target_reference_id"),
+                }
+            elif parsed.action_type == ActionType.ABORT_AIR_PACKAGE:
+                working.normalized_params = {
+                    "package_id": self._require_str(params, "package_id"),
+                    "abort_reason": self._require_str(params, "abort_reason"),
+                }
+            elif parsed.action_type == ActionType.SET_AIR_PACKAGE_POSTURE:
+                package_id = self._require_str(params, "package_id")
+                posture = self._require_str(params, "posture")
+                if posture not in _AIR_PACKAGE_POSTURES:
+                    raise ValueError("posture")
+                working.normalized_params = {"package_id": package_id, "posture": posture}
+            elif parsed.action_type == ActionType.SET_AIR_PACKAGE_ROE:
+                package_id = self._require_str(params, "package_id")
+                roe = self._require_str(params, "roe")
+                if roe not in _AIR_PACKAGE_ROE:
+                    raise ValueError("roe")
+                working.normalized_params = {"package_id": package_id, "roe": roe}
         except KeyError as exc:
             working.reject(RejectionCode.MISSING_REQUIRED_FIELD, f"Action field '{exc.args[0]}' is required.")
             return True
@@ -576,6 +623,19 @@ class ActionValidator:
                     require_owned_group(group_id)
             elif parsed.action_type == ActionType.HOLD_ACTION and params["scope"] == "group":
                 require_owned_group(params["group_id"])
+            elif parsed.action_type in {
+                ActionType.RETASK_AIR_PACKAGE,
+                ActionType.ABORT_AIR_PACKAGE,
+                ActionType.SET_AIR_PACKAGE_POSTURE,
+                ActionType.SET_AIR_PACKAGE_ROE,
+            }:
+                package = next((item for item in self.store.list_air_packages(context.run_id, context.coalition) if item.package_id == params["package_id"]), None)
+                if package is None:
+                    raise _ValidationAbort(RejectionCode.UNKNOWN_ENTITY, f"Unknown air package '{params['package_id']}'.")
+            elif parsed.action_type == ActionType.LAUNCH_AIR_PACKAGE:
+                inventory = next((item for item in self.store.get_air_package_inventories(context.run_id, context.coalition) if item.id == params["inventory_id"]), None)
+                if inventory is None:
+                    raise _ValidationAbort(RejectionCode.UNKNOWN_ENTITY, f"Unknown air package inventory '{params['inventory_id']}'.")
         except _ValidationAbort as exc:
             working.reject(exc.code, exc.message)
             return
@@ -628,6 +688,10 @@ class ActionValidator:
                 self._ensure_sector_not_restricted(context.coalition, destination.sector_id)
             elif parsed.action_type == ActionType.HOLD_ACTION and params["scope"] == "sector":
                 self._require_sector(params["sector_id"])
+            elif parsed.action_type == ActionType.LAUNCH_AIR_PACKAGE:
+                self._validate_air_package_route(context, params, working)
+            elif parsed.action_type == ActionType.RETASK_AIR_PACKAGE:
+                self._validate_air_package_route(context, params, working, retask=True)
         except _ValidationAbort as exc:
             working.reject(exc.code, exc.message)
             return
@@ -671,6 +735,13 @@ class ActionValidator:
                             RejectionCode.ENTITY_UNAVAILABLE,
                             f"Group '{group.id}' is unavailable for actioning.",
                         )
+            elif parsed.action_type == ActionType.LAUNCH_AIR_PACKAGE:
+                inventory = next(item for item in self.store.get_air_package_inventories(context.run_id, context.coalition) if item.id == params["inventory_id"])
+                if inventory.available_count < params["aircraft_count"]:
+                    raise _ValidationAbort(
+                        RejectionCode.ENTITY_UNAVAILABLE,
+                        f"Inventory '{inventory.id}' has {inventory.available_count} aircraft available, below requested count {params['aircraft_count']}.",
+                    )
         except _ValidationAbort as exc:
             working.reject(exc.code, exc.message)
             return
@@ -699,6 +770,17 @@ class ActionValidator:
                             RejectionCode.SCENARIO_RULE_VIOLATION,
                             f"Group '{group.id}' cannot reinforce away from its current position.",
                         )
+            if parsed.action_type in {
+                ActionType.LAUNCH_AIR_PACKAGE,
+                ActionType.RETASK_AIR_PACKAGE,
+                ActionType.ABORT_AIR_PACKAGE,
+                ActionType.SET_AIR_PACKAGE_POSTURE,
+                ActionType.SET_AIR_PACKAGE_ROE,
+            } and not self.air_ops.enabled:
+                raise _ValidationAbort(
+                    RejectionCode.EXECUTION_NOT_SUPPORTED,
+                    "Air package control is disabled in the current air_ops configuration.",
+                )
         except _ValidationAbort as exc:
             working.reject(exc.code, exc.message)
             return
@@ -712,6 +794,7 @@ class ActionValidator:
         sector_priorities: dict[str, tuple[str, str]] = {}
         movement_claims: dict[str, tuple[str, ActionType]] = {}
         posture_claims: dict[str, str] = {}
+        package_claims: dict[str, str] = {}
 
         for result, normalized, _ in working:
             if normalized is None or result.status == ValidationStatus.REJECTED:
@@ -777,6 +860,21 @@ class ActionValidator:
                     )
                     continue
                 posture_claims[group_id] = normalized.action_id
+            elif normalized.action_type in {
+                ActionType.RETASK_AIR_PACKAGE,
+                ActionType.ABORT_AIR_PACKAGE,
+                ActionType.SET_AIR_PACKAGE_POSTURE,
+                ActionType.SET_AIR_PACKAGE_ROE,
+            }:
+                package_id = params["package_id"]
+                prior = package_claims.get(package_id)
+                if prior is not None:
+                    result.reject(
+                        RejectionCode.ACTION_CONFLICT,
+                        f"Air package '{package_id}' already has a conflicting action '{prior}'.",
+                    )
+                    continue
+                package_claims[package_id] = normalized.action_id
 
     def _resolve_destination(self, destination_type: DestinationType, destination_id: str) -> _Destination:
         if destination_type == DestinationType.SECTOR:
@@ -909,6 +1007,217 @@ class ActionValidator:
                 return reserve
         raise _ValidationAbort(RejectionCode.UNKNOWN_ENTITY, f"Unknown reserve group '{reserve_id}'.")
 
+    def _parse_launch_air_package(self, params: dict[str, Any]) -> dict[str, Any]:
+        package_type = self._require_str(params, "package_type")
+        if package_type not in _AIR_PACKAGE_TYPES:
+            raise ValueError("package_type")
+        aircraft_count = params.get("aircraft_count")
+        if not isinstance(aircraft_count, int) or aircraft_count <= 0:
+            raise ValueError("aircraft_count")
+        target_reference_type = self._optional_air_reference_type(params.get("target_reference_type"))
+        target_reference_id = params.get("target_reference_id")
+        if target_reference_type is not None and (not isinstance(target_reference_id, str) or not target_reference_id.strip()):
+            raise ValueError("target_reference_id")
+        return {
+            "inventory_id": self._require_str(params, "inventory_id"),
+            "package_type": package_type,
+            "aircraft_count": aircraft_count,
+            "route_legs": self._parse_route_legs(params.get("route_legs")),
+            "target_reference_type": target_reference_type,
+            "target_reference_id": target_reference_id,
+            "posture": self._optional_posture(params.get("posture")) or "push",
+            "roe": self._optional_roe(params.get("roe")) or "tight",
+        }
+
+    def _parse_route_legs(self, value: Any) -> list[dict[str, Any]]:
+        if not isinstance(value, list) or not value:
+            raise ValueError("route_legs")
+        legs: list[dict[str, Any]] = []
+        for index, item in enumerate(value):
+            if not isinstance(item, dict):
+                raise ValueError("route_legs")
+            reference_type = self._require_str(item, "reference_type")
+            if reference_type not in _AIR_ROUTE_REFERENCE_TYPES:
+                raise ValueError("reference_type")
+            altitude = item.get("altitude_ft_msl")
+            if altitude is not None and (not isinstance(altitude, int) or altitude < 0):
+                raise ValueError("altitude_ft_msl")
+            route_leg = {
+                "leg_id": self._optional_str(item, "leg_id") or f"leg_{index + 1:02d}",
+                "reference_type": reference_type,
+                "reference_id": self._optional_str(item, "reference_id"),
+                "lat": item.get("lat") if isinstance(item.get("lat"), int | float) else None,
+                "lng": item.get("lng") if isinstance(item.get("lng"), int | float) else None,
+                "altitude_ft_msl": altitude,
+                "task": self._optional_str(item, "task"),
+                "note": self._optional_str(item, "note"),
+                "metadata": item.get("metadata", {}) if isinstance(item.get("metadata", {}), dict) else {},
+            }
+            if reference_type == "coordinate":
+                if route_leg["lat"] is None or route_leg["lng"] is None:
+                    raise ValueError("coordinate")
+            elif route_leg["reference_id"] is None:
+                raise ValueError("reference_id")
+            legs.append(route_leg)
+        return legs
+
+    def _validate_air_package_route(
+        self,
+        context: ValidationContext,
+        params: dict[str, Any],
+        working: _WorkingResult,
+        *,
+        retask: bool = False,
+    ) -> None:
+        if not self.air_ops.enabled:
+            raise _ValidationAbort(RejectionCode.EXECUTION_NOT_SUPPORTED, "Air operations are disabled.")
+        bundle = self.map_asset_service.bundle_for_theater(self.scenario.theater) if self.map_asset_service is not None else None
+        if bundle is None or self.terrain_service is None:
+            raise _ValidationAbort(
+                RejectionCode.EXECUTION_NOT_SUPPORTED,
+                "Air package routing requires a configured map asset bundle and terrain service.",
+        )
+        if retask:
+            package = next((item for item in self.store.list_air_packages(context.run_id) if item.package_id == params["package_id"]), None)
+            if package is None:
+                raise _ValidationAbort(RejectionCode.UNKNOWN_ENTITY, f"Unknown air package '{params['package_id']}'.")
+            origin_point = self._require_control_point(package.origin_control_point_id)
+            aircraft_category = package.aircraft_category
+        else:
+            inventory = next((item for item in self.store.get_air_package_inventories(context.run_id) if item.id == params["inventory_id"]), None)
+            if inventory is None:
+                raise _ValidationAbort(RejectionCode.UNKNOWN_ENTITY, f"Unknown air package inventory '{params['inventory_id']}'.")
+            origin_point = self._require_control_point(inventory.origin_control_point_id)
+            if origin_point.owner not in {None, inventory.coalition}:
+                raise _ValidationAbort(
+                    RejectionCode.ENTITY_NOT_OWNED,
+                    f"Origin control point '{origin_point.id}' is not available to coalition '{inventory.coalition.value}'.",
+                )
+            if origin_point.kind not in {"rear_airbase", "carrier", "farp", "airbase"}:
+                raise _ValidationAbort(
+                    RejectionCode.DESTINATION_INVALID,
+                    f"Control point '{origin_point.id}' is not air-capable for package launch.",
+                )
+            if inventory.package_types and params["package_type"] not in inventory.package_types:
+                raise _ValidationAbort(
+                    RejectionCode.SCENARIO_RULE_VIOLATION,
+                    f"Inventory '{inventory.id}' does not support package type '{params['package_type']}'.",
+                )
+            aircraft_category = inventory.aircraft_category
+        self._validate_air_target_reference(context, bundle, params)
+        normalized_legs: list[dict[str, Any]] = []
+        previous_lat = origin_point.lat
+        previous_lng = origin_point.lng
+        if previous_lat is None or previous_lng is None:
+            raise _ValidationAbort(RejectionCode.DESTINATION_INVALID, f"Origin control point '{origin_point.id}' lacks coordinates.")
+        for leg in params["route_legs"]:
+            current_lat, current_lng = self._resolve_air_reference_coordinates(bundle, leg["reference_type"], leg.get("reference_id"), leg.get("lat"), leg.get("lng"))
+            requested_altitude = int(leg.get("altitude_ft_msl") or 0)
+            assessment = self.terrain_service.segment_assessment(
+                bundle,
+                previous_lat,
+                previous_lng,
+                current_lat,
+                current_lng,
+                requested_altitude_ft_msl=requested_altitude,
+                aircraft_category=aircraft_category,
+            )
+            if assessment is None:
+                raise _ValidationAbort(
+                    RejectionCode.SCENARIO_RULE_VIOLATION,
+                    f"Route leg '{leg['leg_id']}' could not be evaluated against terrain bounds.",
+                )
+            normalized_leg = dict(leg)
+            normalized_leg["lat"] = current_lat
+            normalized_leg["lng"] = current_lng
+            normalized_leg["altitude_ft_msl"] = assessment.safe_altitude_ft_msl
+            normalized_leg["max_terrain_ft_msl"] = assessment.max_terrain_ft_msl
+            normalized_legs.append(normalized_leg)
+            if assessment.safe_altitude_ft_msl != requested_altitude:
+                working.status = ValidationStatus.PARTIALLY_ACCEPTED
+                working.add_message(
+                    "warning",
+                    "route_altitude_normalized",
+                    f"Route leg '{leg['leg_id']}' altitude raised to {assessment.safe_altitude_ft_msl} ft MSL for terrain clearance.",
+                )
+            previous_lat = current_lat
+            previous_lng = current_lng
+        params["route_legs"] = normalized_legs
+
+    def _validate_air_target_reference(self, context: ValidationContext, bundle, params: dict[str, Any]) -> None:
+        reference_type = params.get("target_reference_type")
+        reference_id = params.get("target_reference_id")
+        if reference_type is None:
+            return
+        if not isinstance(reference_id, str) or not reference_id.strip():
+            raise _ValidationAbort(
+                RejectionCode.MISSING_REQUIRED_FIELD,
+                "Air package targets require a target_reference_id when target_reference_type is set.",
+            )
+        if reference_type == "contact":
+            if context.latest_knowledge is None or not any(
+                track.track_id == reference_id for track in context.latest_knowledge.contact_tracks
+            ):
+                raise _ValidationAbort(
+                    RejectionCode.DESTINATION_INVALID,
+                    f"Target contact '{reference_id}' is not coalition-visible in the latest knowledge state.",
+                )
+            return
+        self._resolve_air_reference_coordinates(bundle, reference_type, reference_id, None, None)
+
+    def _resolve_air_reference_coordinates(
+        self,
+        bundle,
+        reference_type: str,
+        reference_id: str | None,
+        lat: float | None,
+        lng: float | None,
+    ) -> tuple[float, float]:
+        if reference_type == "sector":
+            sector = self._require_sector(reference_id or "")
+            if sector.center_lat is None or sector.center_lng is None:
+                raise _ValidationAbort(RejectionCode.DESTINATION_INVALID, f"Sector '{sector.id}' lacks center coordinates.")
+            return (sector.center_lat, sector.center_lng)
+        if reference_type == "control_point":
+            control_point = self._require_control_point(reference_id or "")
+            if control_point.lat is None or control_point.lng is None:
+                raise _ValidationAbort(RejectionCode.DESTINATION_INVALID, f"Control point '{control_point.id}' lacks coordinates.")
+            return (control_point.lat, control_point.lng)
+        if reference_type == "zone":
+            zone = self._zone_by_id.get(reference_id or "")
+            if zone is None:
+                raise _ValidationAbort(RejectionCode.DESTINATION_INVALID, f"Unknown zone '{reference_id}'.")
+            return (zone.center_lat, zone.center_lng)
+        if reference_type == "landmark":
+            landmark = next((item for item in (bundle.landmarks if bundle is not None else ()) if item.get("id") == reference_id), None)
+            if landmark is None:
+                raise _ValidationAbort(RejectionCode.DESTINATION_INVALID, f"Unknown landmark '{reference_id}'.")
+            return (float(landmark["lat"]), float(landmark["lng"]))
+        if lat is None or lng is None or not self.terrain_service.within_bounds(bundle, lat, lng):
+            raise _ValidationAbort(RejectionCode.DESTINATION_INVALID, "Coordinate route leg is outside known theater bounds.")
+        return (lat, lng)
+
+    def _optional_air_reference_type(self, value: Any) -> str | None:
+        if value is None:
+            return None
+        if not isinstance(value, str) or value not in {"control_point", "zone", "sector", "landmark", "contact"}:
+            raise ValueError("target_reference_type")
+        return value
+
+    def _optional_posture(self, value: Any) -> str | None:
+        if value is None:
+            return None
+        if not isinstance(value, str) or value not in _AIR_PACKAGE_POSTURES:
+            raise ValueError("posture")
+        return value
+
+    def _optional_roe(self, value: Any) -> str | None:
+        if value is None:
+            return None
+        if not isinstance(value, str) or value not in _AIR_PACKAGE_ROE:
+            raise ValueError("roe")
+        return value
+
     def _read_action_id(self, raw_action: dict[str, Any]) -> str:
         action_id = raw_action.get("action_id", raw_action.get("id"))
         if isinstance(action_id, str) and action_id.strip():
@@ -922,6 +1231,15 @@ class ActionValidator:
                 raise KeyError(key)
             raise ValueError(key)
         return value
+
+    def _optional_str(self, data: dict[str, Any], key: str) -> str | None:
+        value = data.get(key)
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise ValueError(key)
+        stripped = value.strip()
+        return stripped or None
 
     def _parse_action_type(self, value: Any) -> ActionType | None:
         if not isinstance(value, str):

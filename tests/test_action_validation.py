@@ -4,6 +4,7 @@ from pathlib import Path
 from datetime import UTC, datetime
 
 from dcs_dungeon_master.action_validation import ActionValidator
+from dcs_dungeon_master.core.config import AirOpsConfig, MapAssetsConfig, TheaterAssetManifestConfig
 from dcs_dungeon_master.core.enums import Coalition, RejectionCode, ValidationStatus
 from dcs_dungeon_master.core.models import (
     CommanderObservation,
@@ -13,8 +14,11 @@ from dcs_dungeon_master.core.models import (
     ResourceStateView,
     ScenarioStateView,
 )
+from dcs_dungeon_master.map_assets import MapAssetService
 from dcs_dungeon_master.persistence import SQLiteStateStore
 from dcs_dungeon_master.scenario_state.registry import get_scenario_definition
+from dcs_dungeon_master.terrain import TerrainService
+from tests.support_map_assets import write_test_map_assets
 
 
 def _build_validator(tmp_path: Path) -> tuple[SQLiteStateStore, str, ActionValidator]:
@@ -22,6 +26,39 @@ def _build_validator(tmp_path: Path) -> tuple[SQLiteStateStore, str, ActionValid
     scenario = get_scenario_definition("phase1_baseline_persian_gulf", "scenarios/index.toml")
     run_id = store.create_run_from_scenario(scenario)
     return store, run_id, ActionValidator(store, scenario)
+
+
+def _build_air_validator(tmp_path: Path) -> tuple[SQLiteStateStore, str, ActionValidator]:
+    asset_root = tmp_path / "map-assets"
+    write_test_map_assets(asset_root)
+    store = SQLiteStateStore(tmp_path / "state.sqlite3")
+    scenario = get_scenario_definition("phase1_baseline_persian_gulf", "scenarios/index.toml")
+    run_id = store.create_run_from_scenario(scenario)
+    map_asset_service = MapAssetService(
+        MapAssetsConfig(
+            asset_root=str(asset_root),
+            theaters={
+                "persian_gulf": TheaterAssetManifestConfig(
+                    theater_name="Persian Gulf",
+                    basemap_manifest="persian_gulf/basemap.json",
+                    elevation_manifest="persian_gulf/elevation.json",
+                    landmarks_manifest="persian_gulf/landmarks.json",
+                )
+            },
+        )
+    )
+    terrain_service = TerrainService(AirOpsConfig(enabled=True, fixed_wing_clearance_ft=2000, terrain_sample_nm=2))
+    return (
+        store,
+        run_id,
+        ActionValidator(
+            store,
+            scenario,
+            map_asset_service=map_asset_service,
+            terrain_service=terrain_service,
+            air_ops=terrain_service.config,
+        ),
+    )
 
 
 def test_validate_all_phase1_actions_and_persist_batch(tmp_path: Path) -> None:
@@ -366,3 +403,35 @@ def test_validation_audit_report_uses_coalition_safe_sources(tmp_path: Path) -> 
     assert any(item.source_type == "coalition_owned" for item in audit.entries[0].evidence)
     assert any(item.source_type == "scenario_known" for item in audit.entries[0].evidence)
     assert any(item.source_type == "anti_cheat_boundary" for item in audit.entries[0].evidence)
+
+
+def test_launch_air_package_normalizes_unsafe_route_altitude(tmp_path: Path) -> None:
+    _, run_id, validator = _build_air_validator(tmp_path)
+
+    batch = validator.validate_payload(
+        run_id,
+        Coalition.RED,
+        3,
+        [
+            {
+                "action_id": "air_launch_1",
+                "action_type": "launch_air_package",
+                "reason": "Push a CAP through the central corridor.",
+                "inventory_id": "red_fixed_wing_inventory",
+                "package_type": "cap",
+                "aircraft_count": 2,
+                "route_legs": [
+                    {"reference_type": "landmark", "reference_id": "mountain_peak", "altitude_ft_msl": 3000},
+                    {"reference_type": "sector", "reference_id": "central_air_corridor", "altitude_ft_msl": 4000},
+                ],
+                "target_reference_type": "sector",
+                "target_reference_id": "central_air_corridor",
+            }
+        ],
+    )
+
+    result = batch.results[0]
+
+    assert result.status is ValidationStatus.PARTIALLY_ACCEPTED
+    assert any(message.code == "route_altitude_normalized" for message in result.messages)
+    assert result.normalized_params["route_legs"][0]["altitude_ft_msl"] == 6200

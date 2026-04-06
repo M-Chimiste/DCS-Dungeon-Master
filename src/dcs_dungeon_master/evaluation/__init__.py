@@ -45,12 +45,14 @@ from dcs_dungeon_master.core.models import (
 from dcs_dungeon_master.core.versions import ACTION_SCHEMA_VERSION, OBSERVATION_SCHEMA_VERSION
 from dcs_dungeon_master.execution import ExecutionEngine, LiveCommandLoopRunner
 from dcs_dungeon_master.integration import IntegrationIngestCoordinator, build_integration_services
+from dcs_dungeon_master.map_assets import MapAssetService
 from dcs_dungeon_master.model_adapter import DryDecisionLoopRunner, build_model_registry
 from dcs_dungeon_master.observation import ObservationBuilder
 from dcs_dungeon_master.operator_control import OperatorControlService
 from dcs_dungeon_master.persistence import SQLiteStateStore
 from dcs_dungeon_master.scenario_state.registry import get_scenario_definition
 from dcs_dungeon_master.sensor_fusion import SensorFusionService
+from dcs_dungeon_master.terrain import TerrainService
 from dcs_dungeon_master.world_state import WorldStateRepository, WorldStateUpdater
 
 
@@ -771,8 +773,22 @@ class EvaluationService:
         store = self.store
         world_repository = WorldStateRepository(store)
         world_updater = WorldStateUpdater(world_repository, scenario)
-        observation_builder = ObservationBuilder(store, scenario, SensorFusionService(store, scenario, config.fog_of_war), config.multimodal)
-        validator = ActionValidator(store, scenario)
+        observation_builder = ObservationBuilder(
+            store,
+            scenario,
+            SensorFusionService(store, scenario, config.fog_of_war),
+            config.multimodal,
+            map_asset_service=MapAssetService(config.map_assets),
+            terrain_service=TerrainService(config.air_ops),
+            air_ops=config.air_ops,
+        )
+        validator = ActionValidator(
+            store,
+            scenario,
+            map_asset_service=MapAssetService(config.map_assets),
+            terrain_service=TerrainService(config.air_ops),
+            air_ops=config.air_ops,
+        )
         registry = build_model_registry(config)
         integrations = build_integration_services(config.dcs)
         try:
@@ -797,8 +813,22 @@ class EvaluationService:
         store = self.store
         world_repository = WorldStateRepository(store)
         world_updater = WorldStateUpdater(world_repository, scenario)
-        observation_builder = ObservationBuilder(store, scenario, SensorFusionService(store, scenario, config.fog_of_war), config.multimodal)
-        validator = ActionValidator(store, scenario)
+        observation_builder = ObservationBuilder(
+            store,
+            scenario,
+            SensorFusionService(store, scenario, config.fog_of_war),
+            config.multimodal,
+            map_asset_service=MapAssetService(config.map_assets),
+            terrain_service=TerrainService(config.air_ops),
+            air_ops=config.air_ops,
+        )
+        validator = ActionValidator(
+            store,
+            scenario,
+            map_asset_service=MapAssetService(config.map_assets),
+            terrain_service=TerrainService(config.air_ops),
+            air_ops=config.air_ops,
+        )
         registry = build_model_registry(config)
         integrations = build_integration_services(config.dcs)
         try:
