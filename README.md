@@ -37,6 +37,37 @@ Optional for real integration and live testing:
 - DCS-gRPC
 - at least one reachable OpenAI-compatible model backend such as LM Studio
 
+## DCS-Side Setup Model
+
+For live use, the DCS side is primarily the live simulation and integration surface. The authoritative campaign rules do not come from the mission editor alone; they come from the selected scenario package.
+
+In practice, this means:
+
+- DCS provides the running mission, map/theater, Olympus endpoint, and DCS-gRPC endpoint
+- the scenario package defines sectors, control points, zones, coalition budgets, starting forces, reserve pools, and deployment restrictions
+- `init-state` seeds the run from the scenario package into SQLite before dry/live cycles begin
+
+What you should create on the DCS side:
+
+- a mission running on the same theater as the selected scenario
+- Olympus and DCS-gRPC configured and reachable from this app
+- any mission-side groups/control points you want to exist as the live world surface for observation and execution
+
+What determines what each commander can place and use:
+
+- `active_groups`: units that coalition already controls at run start
+- `reserve_groups`: units that coalition may deploy later
+- `allowed_sector_ids`: which sectors a reserve may be deployed into
+- `deployment_restrictions`: no-deploy and adjacency limits
+- coalition budget: whether a reserve can actually be committed
+
+So if you want REDFOR or BLUFOR to have different force pools, different reserve options, or different area restrictions, you author that in the scenario package or in the Studio UI draft flow, not only in DCS.
+
+Important current boundary:
+
+- this repo does not yet treat an arbitrary existing DCS mission as the sole source of truth for commander permissions
+- commander-legal force availability is scenario-authored first, then executed/observed against the live DCS world
+
 ## Install
 
 ```bash
@@ -193,10 +224,13 @@ The Vite app defaults to [http://127.0.0.1:5173](http://127.0.0.1:5173) and prox
 Current Milestone 10.1 QoL improvements:
 
 - Setup tab for local environment checks and local config generation
+- Campaign Studio supports both blank-scenario creation and template-based draft creation
 - Campaign Studio drafts auto-save after a short delay
 - draft lifecycle actions: rename, duplicate, revert, delete
-- click-to-select sector and control-point editing on the map
-- structured editing for zones, force placement, reserve allowed sectors, and restrictions
+- full CRUD for sectors, control points, zones, active groups, reserve groups, restrictions, and standing orders
+- click-to-select and map-click placement for sectors and zones
+- structured editing for neighbors/tags, zones, force placement, reserve allowed sectors, restrictions, and standing orders
+- Save To Repo and Export TOML are both first-class Studio actions
 - validation issues link back to the affected authored object
 - Live Ops layer toggles, manual refresh, and visibility-aware polling
 - catalog-driven run creation with one shared model for both sides by default
@@ -205,7 +239,7 @@ Current Milestone 10.1 QoL improvements:
 Current UI shape:
 
 - `Setup`: local environment checks, Saved Games path override, and `config/local.toml` generation
-- `Studio`: scenario authoring, draft lifecycle, map-driven sector/control-point editing, restriction editing
+- `Studio`: blank/template scenario creation, draft lifecycle, full scenario-object CRUD, map-driven placement/editing, Save To Repo, and Export TOML
 - `Ops`: continue existing runs, run setup, model catalog selection, routing inspection, operator map, commander-safe previews
 
 Useful direct API checks:
@@ -214,6 +248,7 @@ Useful direct API checks:
 curl http://127.0.0.1:8080/api/scenarios
 curl http://127.0.0.1:8080/api/runs
 curl http://127.0.0.1:8080/api/scenarios/drafts
+curl http://127.0.0.1:8080/api/scenarios/drafts/YOUR_DRAFT_ID/export.toml
 curl http://127.0.0.1:8080/api/model-catalog
 curl http://127.0.0.1:8080/api/setup/status
 ```

@@ -48,7 +48,12 @@ def serve_web_ui(
             parsed = urlparse(self.path)
             if parsed.path.startswith("/api/"):
                 try:
-                    body = self._read_json_body() if method in {"POST", "PUT", "PATCH"} else {}
+                    if method == "GET" and parsed.path.endswith("/export.toml"):
+                        draft_id = parsed.path.strip("/").split("/")[-2]
+                        export = service.draft_service.export_draft_toml(draft_id)
+                        self._send_text(HTTPStatus.OK, export.toml, content_type=export.media_type, filename=export.filename)
+                        return
+                    body = self._read_json_body() if method in {"POST", "PUT", "PATCH", "DELETE"} else {}
                     status, payload = service.dispatch(method, parsed.path, body)
                     self._send_json(status, payload)
                     return
@@ -74,6 +79,17 @@ def serve_web_ui(
             self.send_response(status)
             self._send_cors_headers()
             self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def _send_text(self, status: int, payload: str, *, content_type: str, filename: str | None = None) -> None:
+            body = payload.encode("utf-8")
+            self.send_response(status)
+            self._send_cors_headers()
+            self.send_header("Content-Type", content_type)
+            if filename:
+                self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)

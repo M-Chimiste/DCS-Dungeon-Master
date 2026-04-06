@@ -1036,6 +1036,25 @@ class ScenarioDraftPatch:
 
 
 @dataclass(slots=True, frozen=True)
+class ScenarioDraftCreateRequest:
+    mode: str
+    source_scenario_id: str | None = None
+    scenario_id: str | None = None
+    name: str | None = None
+    theater: str | None = None
+    summary: str | None = None
+    version: str = "1"
+
+
+@dataclass(slots=True, frozen=True)
+class ScenarioDraftExportResult:
+    draft_id: str
+    filename: str
+    media_type: str
+    toml: str
+
+
+@dataclass(slots=True, frozen=True)
 class ScenarioDraftView:
     draft_id: str
     source_scenario_id: str

@@ -15,6 +15,15 @@ type MarkerLike = {
   kind?: string;
 };
 
+type ZoneLike = {
+  id: string;
+  name?: string;
+  sector_id?: string;
+  center_lat?: number | null;
+  center_lng?: number | null;
+  radius_nm?: number;
+};
+
 type TrackLike = {
   track_id?: string;
   last_known_sector_id?: string | null;
@@ -32,45 +41,67 @@ type GroupLike = {
 type Props = {
   sectors: SectorLike[];
   controlPoints?: MarkerLike[];
+  zones?: ZoneLike[];
   tracks?: TrackLike[];
   worldGroups?: GroupLike[];
   title?: string;
   selectedSectorId?: string | null;
   selectedControlPointId?: string | null;
+  selectedZoneId?: string | null;
+  referenceCenterLat?: number | null;
+  referenceCenterLng?: number | null;
+  referenceRadiusNm?: number | null;
   onSectorSelect?: (sectorId: string) => void;
   onControlPointSelect?: (controlPointId: string) => void;
+  onZoneSelect?: (zoneId: string) => void;
+  onMapClick?: (coords: { lat: number; lng: number }) => void;
 };
 
 export function MapCanvas({
   sectors,
   controlPoints = [],
+  zones = [],
   tracks = [],
   worldGroups = [],
   title,
   selectedSectorId = null,
   selectedControlPointId = null,
+  selectedZoneId = null,
+  referenceCenterLat = null,
+  referenceCenterLng = null,
+  referenceRadiusNm = null,
   onSectorSelect,
   onControlPointSelect,
+  onZoneSelect,
+  onMapClick,
 }: Props) {
   const width = 720;
   const height = 420;
-  const latitudes = sectors.map((sector) => sector.center_lat ?? 0);
-  const longitudes = sectors.map((sector) => sector.center_lng ?? 0);
-  const minLat = Math.min(...latitudes, 0);
-  const maxLat = Math.max(...latitudes, 1);
-  const minLng = Math.min(...longitudes, 0);
-  const maxLng = Math.max(...longitudes, 1);
-  const spanLat = Math.max(1, maxLat - minLat);
-  const spanLng = Math.max(1, maxLng - minLng);
-  const coordinatesBySector = new Map(
-    sectors.map((sector) => [
-      sector.id,
-      {
-        x: 60 + (((sector.center_lng ?? minLng) - minLng) / spanLng) * (width - 120),
-        y: 50 + (1 - (((sector.center_lat ?? minLat) - minLat) / spanLat)) * (height - 110),
-      },
-    ]),
-  );
+  const latitudes = [
+    ...sectors.map((sector) => sector.center_lat).filter((value): value is number => typeof value === "number"),
+    ...zones.map((zone) => zone.center_lat).filter((value): value is number => typeof value === "number"),
+  ];
+  const longitudes = [
+    ...sectors.map((sector) => sector.center_lng).filter((value): value is number => typeof value === "number"),
+    ...zones.map((zone) => zone.center_lng).filter((value): value is number => typeof value === "number"),
+  ];
+  const defaultCenterLat = referenceCenterLat ?? 25;
+  const defaultCenterLng = referenceCenterLng ?? 55;
+  const referenceDelta = Math.max(((referenceRadiusNm ?? 35) / 60) * 2.5, 1);
+  const minLat = latitudes.length ? Math.min(...latitudes) : defaultCenterLat - referenceDelta;
+  const maxLat = latitudes.length ? Math.max(...latitudes) : defaultCenterLat + referenceDelta;
+  const minLng = longitudes.length ? Math.min(...longitudes) : defaultCenterLng - referenceDelta;
+  const maxLng = longitudes.length ? Math.max(...longitudes) : defaultCenterLng + referenceDelta;
+  const spanLat = Math.max(referenceDelta * 2, maxLat - minLat || 0.5);
+  const spanLng = Math.max(referenceDelta * 2, maxLng - minLng || 0.5);
+
+  const toPoint = (lat?: number | null, lng?: number | null) => ({
+    x: 60 + (((lng ?? minLng) - minLng) / spanLng) * (width - 120),
+    y: 50 + (1 - (((lat ?? minLat) - minLat) / spanLat)) * (height - 110),
+  });
+
+  const coordinatesBySector = new Map(sectors.map((sector) => [sector.id, toPoint(sector.center_lat, sector.center_lng)]));
+  const coordinatesByZone = new Map(zones.map((zone) => [zone.id, toPoint(zone.center_lat, zone.center_lng)]));
 
   return (
     <div className="map-card">
@@ -82,7 +113,43 @@ export function MapCanvas({
             <stop offset="100%" stopColor="#efe1bf" />
           </linearGradient>
         </defs>
-        <rect x="0" y="0" width={width} height={height} rx="20" fill="url(#paper)" />
+        <rect
+          x="0"
+          y="0"
+          width={width}
+          height={height}
+          rx="20"
+          fill="url(#paper)"
+          className={onMapClick ? "map-surface interactive" : "map-surface"}
+          onClick={(event) => {
+            if (!onMapClick) return;
+            const rect = event.currentTarget.getBoundingClientRect();
+            const x = ((event.clientX - rect.left) / rect.width) * width;
+            const y = ((event.clientY - rect.top) / rect.height) * height;
+            const lng = minLng + ((x - 60) / (width - 120)) * spanLng;
+            const lat = minLat + (1 - (y - 50) / (height - 110)) * spanLat;
+            onMapClick({ lat, lng });
+          }}
+        />
+        {zones.map((zone) => {
+          const position = coordinatesByZone.get(zone.id);
+          if (!position) return null;
+          const radius = Math.max(10, Math.min(42, (zone.radius_nm ?? 12) * 0.55));
+          return (
+            <g key={zone.id}>
+              <circle
+                cx={position.x}
+                cy={position.y}
+                r={radius}
+                className={`zone-ring ${selectedZoneId === zone.id ? "selected" : ""} ${onZoneSelect ? "interactive" : ""}`}
+                onClick={() => onZoneSelect?.(zone.id)}
+              />
+              <text x={position.x} y={position.y - radius - 6} textAnchor="middle" className="marker-label">
+                {zone.name ?? zone.id}
+              </text>
+            </g>
+          );
+        })}
         {sectors.map((sector) => {
           const position = coordinatesBySector.get(sector.id);
           if (!position) return null;

@@ -177,6 +177,10 @@ button:hover {
   margin-bottom: 0.5rem;
 }
 
+.wrap-row {
+  flex-wrap: wrap;
+}
+
 .muted {
   color: #6f6256;
 }
@@ -209,9 +213,14 @@ button:hover {
 }
 
 .sector-ring.selected,
-.control-point.selected {
+.control-point.selected,
+.zone-ring.selected {
   stroke-width: 3;
   filter: drop-shadow(0 0 8px rgba(140, 47, 57, 0.32));
+}
+
+.map-surface.interactive {
+  cursor: crosshair;
 }
 
 .sector-front {
@@ -243,6 +252,13 @@ button:hover {
 .control-point {
   fill: #1f2937;
   stroke: #f8f4ec;
+  stroke-width: 1.5;
+}
+
+.zone-ring {
+  fill: rgba(115, 144, 187, 0.14);
+  stroke: #5d381d;
+  stroke-dasharray: 6 4;
   stroke-width: 1.5;
 }
 

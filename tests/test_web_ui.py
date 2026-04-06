@@ -4,8 +4,11 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 import shutil
 
+import pytest
+
 from dcs_dungeon_master.core.config import load_config
 from dcs_dungeon_master.core.enums import RunLifecycleStatus
+from dcs_dungeon_master.core.exceptions import PersistenceError
 from dcs_dungeon_master.integration.types import GrpcStreamEnvelope
 from dcs_dungeon_master.observation import ObservationBuilder
 from dcs_dungeon_master.persistence import SQLiteStateStore
@@ -184,6 +187,82 @@ def test_scenario_draft_lifecycle_and_structured_validation(tmp_path: Path) -> N
     assert deleted["deleted"] is True
 
 
+def test_blank_scenario_draft_creation_export_and_object_crud(tmp_path: Path) -> None:
+    registry_path = _copy_registry(tmp_path)
+    store = SQLiteStateStore(tmp_path / "drafts.sqlite3")
+    store.initialize_schema()
+    service = ScenarioDraftService(store, index_path=registry_path, reference_service=PydcsReferenceService())
+
+    blank = service.create_blank_draft(
+        scenario_id="blank_test",
+        name="Blank Test",
+        theater="Syria",
+        summary="Blank testing scenario.",
+    )
+    validation = service.validate_draft(blank.draft_id)
+    sector_create = service.create_object(blank.draft_id, "sector", {"center_lat": 35.0, "center_lng": 37.0})
+    draft_after_sector = sector_create["draft"]
+    control_point_create = service.create_object(
+        blank.draft_id,
+        "control_point",
+        {"sector_id": draft_after_sector.scenario["sectors"][0]["id"]},
+    )
+    zone_create = service.create_object(
+        blank.draft_id,
+        "zone",
+        {"sector_id": draft_after_sector.scenario["sectors"][0]["id"], "center_lat": 35.1, "center_lng": 37.1},
+    )
+    active_group_create = service.create_object(blank.draft_id, "active_group", {"coalition": "red"})
+    reserve_group_create = service.create_object(blank.draft_id, "reserve_group", {"coalition": "blue"})
+    restriction_create = service.create_object(blank.draft_id, "deployment_restriction", {})
+    standing_order_create = service.create_object(blank.draft_id, "standing_order", {"coalition": "red"})
+    export_result = service.export_draft_toml(blank.draft_id)
+
+    assert blank.source_scenario_id.startswith("__blank__:")
+    assert blank.map_reference is not None
+    assert validation["valid"] is False
+    assert validation["issues"][0]["suggestion"]
+    assert sector_create["created_object"]["object"]["id"] == "sector_1"
+    assert control_point_create["created_object"]["object"]["sector_id"] == "sector_1"
+    assert zone_create["created_object"]["object"]["sector_id"] == "sector_1"
+    assert active_group_create["created_object"]["object"]["id"] == "active_group_1"
+    assert reserve_group_create["created_object"]["object"]["id"] == "reserve_group_1"
+    assert restriction_create["created_object"]["object"]["id"] == "restriction_1"
+    assert standing_order_create["created_object"]["object"]["coalition"] == "red"
+    assert export_result.filename == "blank_test.toml"
+    assert 'id = "blank_test"' in export_result.toml
+
+
+def test_scenario_draft_delete_blocking_and_duplicate_paths(tmp_path: Path) -> None:
+    registry_path = _copy_registry(tmp_path)
+    store = SQLiteStateStore(tmp_path / "drafts.sqlite3")
+    store.initialize_schema()
+    service = ScenarioDraftService(store, index_path=registry_path, reference_service=PydcsReferenceService())
+
+    draft = service.create_draft("phase1_baseline_persian_gulf")
+    sector_id = draft.scenario["sectors"][0]["id"]
+    control_point_id = draft.scenario["control_points"][0]["id"]
+    standing_order = draft.scenario["coalitions"][0]["standing_orders"][0]
+
+    with pytest.raises(PersistenceError):
+        service.delete_object(draft.draft_id, "sector", sector_id)
+
+    with pytest.raises(PersistenceError):
+        service.delete_object(draft.draft_id, "control_point", control_point_id)
+
+    duplicated_sector = service.duplicate_object(draft.draft_id, "sector", sector_id)
+    duplicated_order = service.duplicate_object(
+        draft.draft_id,
+        "standing_order",
+        standing_order["id"],
+        {"coalition": draft.scenario["coalitions"][0]["coalition"]},
+    )
+
+    assert duplicated_sector["created_object"]["object"]["id"] != sector_id
+    assert duplicated_sector["created_object"]["object"]["neighbor_ids"] == []
+    assert duplicated_order["created_object"]["object"]["id"] != standing_order["id"]
+
+
 def test_pydcs_reference_service_returns_authored_fallback() -> None:
     scenario = get_scenario_definition("phase1_baseline_fulda_gap", "scenarios/index.toml")
     reference = PydcsReferenceService().reference_for_scenario(scenario)
@@ -261,6 +340,47 @@ def test_web_ui_draft_management_routes(tmp_path: Path) -> None:
     assert revert_payload["draft"]["draft_id"] == draft_id
     assert delete_status == 200
     assert delete_payload["deleted"] is True
+
+
+def test_web_ui_blank_draft_export_and_object_routes(tmp_path: Path) -> None:
+    registry_path = _copy_registry(tmp_path)
+    config_path = _write_temp_config(tmp_path, registry_path=registry_path)
+    service = WebUiService.from_config_path(config_path)
+
+    create_status, create_payload = service.dispatch(
+        "POST",
+        "/api/scenarios/drafts",
+        {
+            "blank_scenario": {
+                "scenario_id": "api_blank_test",
+                "name": "API Blank Test",
+                "theater": "Iraq",
+                "summary": "API blank draft.",
+            }
+        },
+    )
+    draft_id = create_payload["draft"]["draft_id"]
+    sector_status, sector_payload = service.dispatch(
+        "POST",
+        f"/api/scenarios/drafts/{draft_id}/objects",
+        {"object_type": "sector", "center_lat": 34.5, "center_lng": 43.5},
+    )
+    control_point_status, control_point_payload = service.dispatch(
+        "POST",
+        f"/api/scenarios/drafts/{draft_id}/objects",
+        {"object_type": "control_point", "sector_id": "sector_1"},
+    )
+    export_status, export_payload = service.dispatch("GET", f"/api/scenarios/drafts/{draft_id}/export.toml")
+
+    assert create_status == 200
+    assert create_payload["draft"]["source_scenario_id"].startswith("__blank__:")
+    assert sector_status == 200
+    assert sector_payload["created_object"]["object"]["id"] == "sector_1"
+    assert control_point_status == 200
+    assert control_point_payload["created_object"]["object"]["sector_id"] == "sector_1"
+    assert export_status == 200
+    assert export_payload["export"]["filename"] == "api_blank_test.toml"
+    assert 'id = "api_blank_test"' in export_payload["export"]["toml"]
 
 
 def test_web_ui_model_catalog_and_run_routing_routes(tmp_path: Path) -> None:

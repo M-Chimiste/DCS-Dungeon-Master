@@ -24,6 +24,7 @@ from dcs_dungeon_master.core.models import (
     ResolvedCoalitionRouting,
     ResolvedRunRouting,
     RunScopedBackendDefinition,
+    ScenarioDraftCreateRequest,
     ScenarioDraftPatch,
 )
 from dcs_dungeon_master.evaluation import build_evaluation_metadata
@@ -116,8 +117,23 @@ class WebUiService:
             "force_policies": _json_ready(self._force_policy_views(scenario)),
         }
 
-    def create_scenario_draft(self, source_scenario_id: str) -> dict[str, Any]:
-        return {"draft": _json_ready(self.draft_service.create_draft(source_scenario_id))}
+    def create_scenario_draft(self, payload: dict[str, Any]) -> dict[str, Any]:
+        if isinstance(payload.get("blank_scenario"), dict):
+            blank = payload["blank_scenario"]
+            request = ScenarioDraftCreateRequest(
+                mode="blank",
+                scenario_id=str(blank.get("scenario_id", "")).strip() or None,
+                name=str(blank.get("name", "")).strip() or None,
+                theater=str(blank.get("theater", "")).strip() or None,
+                summary=str(blank.get("summary", "")).strip() or None,
+                version=str(blank.get("version", "1")),
+            )
+        else:
+            request = ScenarioDraftCreateRequest(
+                mode="template",
+                source_scenario_id=str(payload.get("source_scenario_id", "")).strip() or None,
+            )
+        return {"draft": _json_ready(self.draft_service.create_draft_from_request(request))}
 
     def list_scenario_drafts(self) -> dict[str, Any]:
         return {"drafts": _json_ready(self.draft_service.list_drafts())}
@@ -163,6 +179,22 @@ class WebUiService:
             name=name.strip(),
             overwrite=bool(payload.get("overwrite", False)),
         )
+
+    def export_scenario_draft(self, draft_id: str) -> dict[str, Any]:
+        return {"export": _json_ready(self.draft_service.export_draft_toml(draft_id))}
+
+    def create_scenario_object(self, draft_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        object_type = payload.get("object_type")
+        if not isinstance(object_type, str) or not object_type.strip():
+            raise PersistenceError("object_type is required.")
+        result = self.draft_service.create_object(draft_id, object_type.strip(), payload)
+        return _json_ready(result)
+
+    def duplicate_scenario_object(self, draft_id: str, object_type: str, object_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        return _json_ready(self.draft_service.duplicate_object(draft_id, object_type, object_id, payload))
+
+    def delete_scenario_object(self, draft_id: str, object_type: str, object_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        return _json_ready(self.draft_service.delete_object(draft_id, object_type, object_id, payload))
 
     def list_theaters(self) -> dict[str, Any]:
         by_theater: dict[str, dict[str, Any]] = {}
@@ -526,11 +558,13 @@ class WebUiService:
             if method == "GET" and segments == ["api", "scenarios"]:
                 return (200, self.list_scenarios())
             if method == "POST" and segments == ["api", "scenarios", "drafts"]:
-                return (200, self.create_scenario_draft(str(body.get("source_scenario_id", ""))))
+                return (200, self.create_scenario_draft(body))
             if method == "GET" and len(segments) == 4 and segments[1:3] == ["scenarios", "drafts"]:
                 return (200, self.get_scenario_draft(segments[3]))
             if method == "PUT" and len(segments) == 4 and segments[1:3] == ["scenarios", "drafts"]:
                 return (200, self.update_scenario_draft(segments[3], body))
+            if method == "GET" and len(segments) == 5 and segments[1:3] == ["scenarios", "drafts"] and segments[4] == "export.toml":
+                return (200, self.export_scenario_draft(segments[3]))
             if method == "PATCH" and len(segments) == 5 and segments[1:3] == ["scenarios", "drafts"] and segments[4] == "rename":
                 return (200, self.rename_scenario_draft(segments[3], body))
             if method == "POST" and len(segments) == 5 and segments[1:3] == ["scenarios", "drafts"] and segments[4] == "duplicate":
@@ -543,6 +577,12 @@ class WebUiService:
                 return (200, self.validate_scenario_draft(segments[3]))
             if method == "POST" and len(segments) == 5 and segments[1:3] == ["scenarios", "drafts"] and segments[4] == "save-as":
                 return (200, self.save_scenario_draft(segments[3], body))
+            if method == "POST" and len(segments) == 5 and segments[1:3] == ["scenarios", "drafts"] and segments[4] == "objects":
+                return (200, self.create_scenario_object(segments[3], body))
+            if method == "DELETE" and len(segments) == 7 and segments[1:3] == ["scenarios", "drafts"] and segments[4] == "objects":
+                return (200, self.delete_scenario_object(segments[3], segments[5], segments[6], body))
+            if method == "POST" and len(segments) == 8 and segments[1:3] == ["scenarios", "drafts"] and segments[4] == "objects" and segments[7] == "duplicate":
+                return (200, self.duplicate_scenario_object(segments[3], segments[5], segments[6], body))
             if method == "GET" and len(segments) == 3 and segments[1] == "scenarios":
                 return (200, self.get_scenario(segments[2]))
             if method == "GET" and segments == ["api", "theaters"]:

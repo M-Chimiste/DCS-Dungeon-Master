@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import importlib
 from typing import Any
 
@@ -79,6 +79,18 @@ class PydcsReferenceService:
                 }
                 for zone in scenario.zones
             ),
+        )
+
+    def reference_for_blank_scenario(self, scenario: ScenarioDefinition, fallback: ScenarioDefinition | None = None) -> MapReferenceLayer:
+        if fallback is None:
+            return self.reference_for_scenario(scenario)
+        reference = self.reference_for_scenario(fallback)
+        return replace(
+            reference,
+            theater_id=scenario.theater,
+            sectors=(),
+            control_points=(),
+            zones=(),
         )
 
     def _default_view(self, scenario: ScenarioDefinition) -> tuple[float | None, float | None, float | None]:

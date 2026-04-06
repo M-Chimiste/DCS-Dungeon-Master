@@ -40,6 +40,29 @@ The normal workflow is one shared model for both REDFOR and BLUFOR. You can spli
 
 The default scenario is `phase1_baseline_persian_gulf`, but the repo also includes authored baseline scenarios for Syria, Afghanistan, Iraq, and Fulda Gap.
 
+## 2.5. What You Need On The DCS Side
+
+For live play, you need:
+
+- a DCS mission running on the same map/theater as your selected scenario
+- Olympus reachable from this app
+- DCS-gRPC reachable from this app
+- the required `autoexec.cfg` permissions for Olympus
+
+The important design rule is:
+
+- DCS is the live world/integration surface
+- the scenario package is the authoritative source for commander force availability and campaign rules
+
+That means the commander does not learn “what units may be used” just from whatever happens to exist in the mission editor. The allowed force catalog comes from the scenario package:
+
+- `active_groups` are the starting controlled units
+- `reserve_groups` are the deployable reserves
+- `allowed_sector_ids` constrain where reserves may be committed
+- `deployment_restrictions` and coalition budget further limit legal actions
+
+So if you want to change what REDFOR or BLUFOR can place and use, edit the scenario package or use the Studio draft editor, then initialize or create the run from that scenario.
+
 ## 3. Smoke Test Without Live Integrations
 
 Optional but recommended first:
@@ -180,16 +203,19 @@ Recommended Milestone 10.1 demo sequence:
 1. Open `Setup`
 2. Probe your environment and write `config/local.toml` if needed
 3. Open `Studio`
-4. Select a scenario and create a draft
-5. Click sectors and control points directly on the map
-6. Change a sector radius, move an active group, or toggle reserve allowed sectors
-7. Wait for the auto-save badge to settle on `Saved`
-8. Run `Validate` and click any returned issue to jump back to the affected object
-9. Open `Ops`
-10. In `Continue Existing Run`, open or continue a persisted run if you already have one
-11. Otherwise, in `Run Setup`, keep `Use same model for both sides` on and pick a shared catalog preset
-12. Create a dry run
-13. Toggle layers and use `Refresh Now` after a dry or live cycle
+4. Choose either `From Template` or `Blank Scenario`
+5. If using blank creation, set theater, scenario id, name, and summary, then create the draft
+6. Use the authoring toolbar to add sectors, control points, zones, active groups, reserve groups, restrictions, and standing orders
+7. Click the map directly to place new sectors or zones when add mode is active
+8. Edit geometry, neighbors, tags, force placement, reserve allowed sectors, and restrictions in the inspectors
+9. Wait for the auto-save badge to settle on `Saved`
+10. Run `Validate` and click any returned issue to jump back to the affected object
+11. Use `Save To Repo` to write a real scenario package, or `Export TOML` to download the current draft without touching the registry
+12. Open `Ops`
+13. In `Continue Existing Run`, open or continue a persisted run if you already have one
+14. Otherwise, in `Run Setup`, keep `Use same model for both sides` on and pick a shared catalog preset
+15. Create a dry run
+16. Toggle layers and use `Refresh Now` after a dry or live cycle
 
 If you want asymmetric routing:
 
@@ -206,6 +232,12 @@ curl http://127.0.0.1:8080/api/runs
 curl http://127.0.0.1:8080/api/scenarios/drafts
 curl http://127.0.0.1:8080/api/model-catalog
 curl http://127.0.0.1:8080/api/setup/status
+```
+
+To export a Studio draft as TOML:
+
+```bash
+curl http://127.0.0.1:8080/api/scenarios/drafts/YOUR_DRAFT_ID/export.toml
 ```
 
 Recommended shortest UI path:
