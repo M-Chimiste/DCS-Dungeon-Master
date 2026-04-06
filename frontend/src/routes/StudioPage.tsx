@@ -18,7 +18,7 @@ type ScenarioPayload = {
 
 type SaveState = "idle" | "dirty" | "saving" | "saved" | "error";
 type CreateMode = "template" | "blank";
-type MapAddMode = "sector" | "zone" | null;
+type MapAddMode = "sector" | "control_point" | "zone" | "landmark" | null;
 
 const BLANK_SOURCE_PREFIX = "__blank__:";
 
@@ -30,8 +30,11 @@ export function StudioPage() {
   const [selectedSectorId, setSelectedSectorId] = useState<string>("");
   const [selectedControlPointId, setSelectedControlPointId] = useState<string>("");
   const [selectedZoneId, setSelectedZoneId] = useState<string>("");
+  const [selectedLandmarkId, setSelectedLandmarkId] = useState<string>("");
   const [selectedActiveGroupId, setSelectedActiveGroupId] = useState<string>("");
   const [selectedReserveGroupId, setSelectedReserveGroupId] = useState<string>("");
+  const [selectedInventoryId, setSelectedInventoryId] = useState<string>("");
+  const [selectedPresetId, setSelectedPresetId] = useState<string>("");
   const [selectedRestrictionId, setSelectedRestrictionId] = useState<string>("");
   const [selectedStandingOrderId, setSelectedStandingOrderId] = useState<string>("");
   const [validation, setValidation] = useState<any | null>(null);
@@ -75,8 +78,11 @@ export function StudioPage() {
         setSelectedSectorId(payload.scenario.sectors[0]?.id ?? "");
         setSelectedControlPointId("");
         setSelectedZoneId(payload.scenario.zones?.[0]?.id ?? "");
+        setSelectedLandmarkId(payload.scenario.landmarks?.[0]?.id ?? "");
         setSelectedActiveGroupId(payload.scenario.active_groups?.[0]?.id ?? "");
         setSelectedReserveGroupId(payload.scenario.reserve_groups?.[0]?.id ?? "");
+        setSelectedInventoryId(payload.scenario.air_package_inventories?.[0]?.id ?? "");
+        setSelectedPresetId(payload.scenario.air_package_presets?.[0]?.id ?? "");
         setSelectedRestrictionId(payload.scenario.deployment_restrictions?.[0]?.id ?? "");
         setSelectedStandingOrderId(payload.scenario.coalitions?.flatMap((item: any) => item.standing_orders ?? [])[0]?.id ?? "");
         setDraft(null);
@@ -112,8 +118,11 @@ export function StudioPage() {
   const sectors = currentScenario?.sectors ?? [];
   const controlPoints = currentScenario?.control_points ?? [];
   const zones = currentScenario?.zones ?? [];
+  const landmarks = currentScenario?.landmarks ?? [];
   const activeGroups = currentScenario?.active_groups ?? [];
   const reserveGroups = currentScenario?.reserve_groups ?? [];
+  const inventories = currentScenario?.air_package_inventories ?? [];
+  const presets = currentScenario?.air_package_presets ?? [];
   const restrictions = currentScenario?.deployment_restrictions ?? [];
   const coalitions = currentScenario?.coalitions ?? [];
   const standingOrders = coalitions.flatMap((coalition: any) =>
@@ -125,8 +134,11 @@ export function StudioPage() {
   const selectedSector = sectors.find((item: any) => item.id === selectedSectorId) ?? null;
   const selectedControlPoint = controlPoints.find((item: any) => item.id === selectedControlPointId) ?? null;
   const selectedZone = zones.find((item: any) => item.id === selectedZoneId) ?? null;
+  const selectedLandmark = landmarks.find((item: any) => item.id === selectedLandmarkId) ?? null;
   const selectedActiveGroup = activeGroups.find((item: any) => item.id === selectedActiveGroupId) ?? null;
   const selectedReserveGroup = reserveGroups.find((item: any) => item.id === selectedReserveGroupId) ?? null;
+  const selectedInventory = inventories.find((item: any) => item.id === selectedInventoryId) ?? null;
+  const selectedPreset = presets.find((item: any) => item.id === selectedPresetId) ?? null;
   const selectedRestriction = restrictions.find((item: any) => item.id === selectedRestrictionId) ?? null;
   const selectedStandingOrder = standingOrders.find((item: any) => item.id === selectedStandingOrderId) ?? null;
 
@@ -161,8 +173,11 @@ export function StudioPage() {
     setSelectedSectorId(nextDraft.scenario.sectors?.[0]?.id ?? "");
     setSelectedControlPointId(nextDraft.scenario.control_points?.[0]?.id ?? "");
     setSelectedZoneId(nextDraft.scenario.zones?.[0]?.id ?? "");
+    setSelectedLandmarkId(nextDraft.scenario.landmarks?.[0]?.id ?? "");
     setSelectedActiveGroupId(nextDraft.scenario.active_groups?.[0]?.id ?? "");
     setSelectedReserveGroupId(nextDraft.scenario.reserve_groups?.[0]?.id ?? "");
+    setSelectedInventoryId(nextDraft.scenario.air_package_inventories?.[0]?.id ?? "");
+    setSelectedPresetId(nextDraft.scenario.air_package_presets?.[0]?.id ?? "");
     setSelectedRestrictionId(nextDraft.scenario.deployment_restrictions?.[0]?.id ?? "");
     setSelectedStandingOrderId(
       nextDraft.scenario.coalitions?.flatMap((item: any) => item.standing_orders ?? [])[0]?.id ?? "",
@@ -284,8 +299,11 @@ export function StudioPage() {
     if (objectType === "sector") setSelectedSectorId(createdId);
     if (objectType === "control_point") setSelectedControlPointId(createdId);
     if (objectType === "zone") setSelectedZoneId(createdId);
+    if (objectType === "landmark") setSelectedLandmarkId(createdId);
     if (objectType === "active_group") setSelectedActiveGroupId(createdId);
     if (objectType === "reserve_group") setSelectedReserveGroupId(createdId);
+    if (objectType === "air_package_inventory") setSelectedInventoryId(createdId);
+    if (objectType === "air_package_preset") setSelectedPresetId(createdId);
     if (objectType === "deployment_restriction") setSelectedRestrictionId(createdId);
     if (objectType === "standing_order") setSelectedStandingOrderId(createdId);
     setStatusText(`Created ${labelForObjectType(objectType)} ${createdId}.`);
@@ -305,8 +323,11 @@ export function StudioPage() {
     if (objectType === "sector") setSelectedSectorId(createdId);
     if (objectType === "control_point") setSelectedControlPointId(createdId);
     if (objectType === "zone") setSelectedZoneId(createdId);
+    if (objectType === "landmark") setSelectedLandmarkId(createdId);
     if (objectType === "active_group") setSelectedActiveGroupId(createdId);
     if (objectType === "reserve_group") setSelectedReserveGroupId(createdId);
+    if (objectType === "air_package_inventory") setSelectedInventoryId(createdId);
+    if (objectType === "air_package_preset") setSelectedPresetId(createdId);
     if (objectType === "deployment_restriction") setSelectedRestrictionId(createdId);
     if (objectType === "standing_order") setSelectedStandingOrderId(createdId);
     setStatusText(`Duplicated ${labelForObjectType(objectType)} ${objectId}.`);
@@ -323,8 +344,13 @@ export function StudioPage() {
     if (objectType === "sector") setSelectedSectorId(payload.draft.scenario.sectors?.[0]?.id ?? "");
     if (objectType === "control_point") setSelectedControlPointId(payload.draft.scenario.control_points?.[0]?.id ?? "");
     if (objectType === "zone") setSelectedZoneId(payload.draft.scenario.zones?.[0]?.id ?? "");
+    if (objectType === "landmark") setSelectedLandmarkId(payload.draft.scenario.landmarks?.[0]?.id ?? "");
     if (objectType === "active_group") setSelectedActiveGroupId(payload.draft.scenario.active_groups?.[0]?.id ?? "");
     if (objectType === "reserve_group") setSelectedReserveGroupId(payload.draft.scenario.reserve_groups?.[0]?.id ?? "");
+    if (objectType === "air_package_inventory") {
+      setSelectedInventoryId(payload.draft.scenario.air_package_inventories?.[0]?.id ?? "");
+    }
+    if (objectType === "air_package_preset") setSelectedPresetId(payload.draft.scenario.air_package_presets?.[0]?.id ?? "");
     if (objectType === "deployment_restriction") setSelectedRestrictionId(payload.draft.scenario.deployment_restrictions?.[0]?.id ?? "");
     if (objectType === "standing_order") {
       const nextStandingOrder =
@@ -378,6 +404,16 @@ export function StudioPage() {
     });
   };
 
+  const updateLandmarkField = (field: string, value: string | number | string[]) => {
+    if (!draft || !selectedLandmarkId) return;
+    markDraftScenario({
+      ...draft.scenario,
+      landmarks: landmarks.map((landmark: any) =>
+        landmark.id === selectedLandmarkId ? { ...landmark, [field]: value } : landmark,
+      ),
+    });
+  };
+
   const updateActiveGroup = (groupId: string, field: string, value: string | null | boolean) => {
     if (!draft) return;
     markDraftScenario({
@@ -391,6 +427,41 @@ export function StudioPage() {
     markDraftScenario({
       ...draft.scenario,
       reserve_groups: reserveGroups.map((group: any) => (group.id === reserveId ? { ...group, [field]: value } : group)),
+    });
+  };
+
+  const updateInventoryField = (inventoryId: string, field: string, value: string | number | string[]) => {
+    if (!draft) return;
+    markDraftScenario({
+      ...draft.scenario,
+      air_package_inventories: inventories.map((inventory: any) =>
+        inventory.id === inventoryId ? { ...inventory, [field]: value } : inventory,
+      ),
+    });
+  };
+
+  const updatePresetField = (presetId: string, field: string, value: string | number | null) => {
+    if (!draft) return;
+    markDraftScenario({
+      ...draft.scenario,
+      air_package_presets: presets.map((preset: any) => (preset.id === presetId ? { ...preset, [field]: value } : preset)),
+    });
+  };
+
+  const updatePresetRouteLeg = (presetId: string, legIndex: number, field: string, value: string | number | null) => {
+    if (!draft) return;
+    markDraftScenario({
+      ...draft.scenario,
+      air_package_presets: presets.map((preset: any) =>
+        preset.id === presetId
+          ? {
+              ...preset,
+              route_legs: (preset.route_legs ?? []).map((leg: any, index: number) =>
+                index === legIndex ? { ...leg, [field]: value } : leg,
+              ),
+            }
+          : preset,
+      ),
     });
   };
 
@@ -616,11 +687,11 @@ export function StudioPage() {
                   setStatusText("Select a sector before adding a control point.");
                   return;
                 }
-                void createObject("control_point", { sector_id: selectedSectorId });
+                setMapAddMode("control_point");
               }}
               disabled={!draft}
             >
-              Add Control Point
+              {mapAddMode === "control_point" ? "Click Map To Place Control Point" : "Add Control Point"}
             </button>
             <button
               onClick={() => {
@@ -634,6 +705,9 @@ export function StudioPage() {
             >
               {mapAddMode === "zone" ? "Click Map To Place Zone" : "Add Zone"}
             </button>
+            <button onClick={() => setMapAddMode("landmark")} disabled={!draft}>
+              {mapAddMode === "landmark" ? "Click Map To Place Landmark" : "Add Landmark"}
+            </button>
             <select value={toolbarCoalition} onChange={(event) => setToolbarCoalition(event.target.value)} disabled={!draft}>
               <option value="red">REDFOR</option>
               <option value="blue">BLUFOR</option>
@@ -643,6 +717,12 @@ export function StudioPage() {
             </button>
             <button onClick={() => void createObject("reserve_group", { coalition: toolbarCoalition })} disabled={!draft}>
               Add Reserve Group
+            </button>
+            <button onClick={() => void createObject("air_package_inventory", { coalition: toolbarCoalition })} disabled={!draft}>
+              Add Air Inventory
+            </button>
+            <button onClick={() => void createObject("air_package_preset", { coalition: toolbarCoalition })} disabled={!draft}>
+              Add Air Preset
             </button>
             <button onClick={() => void createObject("deployment_restriction", {})} disabled={!draft}>
               Add Restriction
@@ -658,12 +738,22 @@ export function StudioPage() {
           controlPoints={controlPoints}
           zones={zones}
           basemap={reference?.basemap}
-          landmarks={reference?.landmarks ?? []}
+          landmarks={
+            draft
+              ? [
+                  ...landmarks,
+                  ...(reference?.landmarks ?? []).filter(
+                    (item: any) => !landmarks.some((landmark: any) => landmark.id === item.id),
+                  ),
+                ]
+              : reference?.landmarks ?? []
+          }
           terrainSummary={reference?.terrain_summary ?? []}
           title={currentScenario?.name ?? "Scenario"}
           selectedSectorId={selectedSectorId}
           selectedControlPointId={selectedControlPointId}
           selectedZoneId={selectedZoneId}
+          selectedLandmarkId={selectedLandmarkId}
           referenceCenterLat={reference?.default_center_lat}
           referenceCenterLng={reference?.default_center_lng}
           referenceRadiusNm={reference?.default_radius_nm}
@@ -671,32 +761,84 @@ export function StudioPage() {
             setSelectedSectorId(sectorId);
             setSelectedControlPointId("");
             setSelectedZoneId("");
+            setSelectedLandmarkId("");
           }}
           onControlPointSelect={(controlPointId) => {
             setSelectedControlPointId(controlPointId);
             setSelectedSectorId("");
             setSelectedZoneId("");
+            setSelectedLandmarkId("");
           }}
           onZoneSelect={(zoneId) => {
             setSelectedZoneId(zoneId);
+            setSelectedSectorId("");
+            setSelectedControlPointId("");
+            setSelectedLandmarkId("");
+          }}
+          onLandmarkSelect={(landmarkId) => {
+            setSelectedLandmarkId(landmarkId);
+            setSelectedZoneId("");
             setSelectedSectorId("");
             setSelectedControlPointId("");
           }}
           onMapClick={(coords) => {
             if (mapAddMode === "sector") {
               void createObject("sector", { center_lat: coords.lat, center_lng: coords.lng });
+            } else if (mapAddMode === "control_point" && selectedSectorId) {
+              void createObject("control_point", { sector_id: selectedSectorId, lat: coords.lat, lng: coords.lng });
             } else if (mapAddMode === "zone" && selectedSectorId) {
               void createObject("zone", { sector_id: selectedSectorId, center_lat: coords.lat, center_lng: coords.lng });
+            } else if (mapAddMode === "landmark") {
+              void createObject("landmark", { lat: coords.lat, lng: coords.lng });
             }
             setMapAddMode(null);
+          }}
+          onSectorMove={(sectorId, coords) => {
+            if (!draft || sectorId !== selectedSectorId) return;
+            markDraftScenario({
+              ...draft.scenario,
+              sectors: sectors.map((sector: any) =>
+                sector.id === sectorId ? { ...sector, center_lat: coords.lat, center_lng: coords.lng } : sector,
+              ),
+            });
+          }}
+          onControlPointMove={(controlPointId, coords) => {
+            if (!draft) return;
+            markDraftScenario({
+              ...draft.scenario,
+              control_points: controlPoints.map((point: any) =>
+                point.id === controlPointId ? { ...point, lat: coords.lat, lng: coords.lng } : point,
+              ),
+            });
+          }}
+          onZoneMove={(zoneId, coords) => {
+            if (!draft || zoneId !== selectedZoneId) return;
+            markDraftScenario({
+              ...draft.scenario,
+              zones: zones.map((zone: any) =>
+                zone.id === zoneId ? { ...zone, center_lat: coords.lat, center_lng: coords.lng } : zone,
+              ),
+            });
+          }}
+          onLandmarkMove={(landmarkId, coords) => {
+            if (!draft || landmarkId !== selectedLandmarkId) return;
+            markDraftScenario({
+              ...draft.scenario,
+              landmarks: landmarks.map((landmark: any) =>
+                landmark.id === landmarkId ? { ...landmark, lat: coords.lat, lng: coords.lng } : landmark,
+              ),
+            });
           }}
         />
         <div className="summary-grid">
           <SummaryCard title="Sectors" value={sectors.length} />
           <SummaryCard title="Control Points" value={controlPoints.length} />
           <SummaryCard title="Zones" value={zones.length} />
+          <SummaryCard title="Landmarks" value={landmarks.length} />
           <SummaryCard title="Active Groups" value={activeGroups.length} />
           <SummaryCard title="Reserve Groups" value={reserveGroups.length} />
+          <SummaryCard title="Air Inventories" value={inventories.length} />
+          <SummaryCard title="Air Presets" value={presets.length} />
           <SummaryCard title="Restrictions" value={restrictions.length} />
         </div>
         {reference ? (
@@ -871,6 +1013,196 @@ export function StudioPage() {
             </>
           ) : (
             <p className="muted">No zones yet. Add one from the toolbar.</p>
+          )}
+        </div>
+
+        <div className="panel">
+          <h2>Landmarks</h2>
+          {landmarks.length ? (
+            <>
+              <select value={selectedLandmarkId} onChange={(event) => setSelectedLandmarkId(event.target.value)}>
+                {landmarks.map((landmark: any) => (
+                  <option key={landmark.id} value={landmark.id}>
+                    {landmark.name}
+                  </option>
+                ))}
+              </select>
+              {selectedLandmark ? (
+                <>
+                  <div className="button-row">
+                    <button onClick={() => void duplicateObject("landmark", selectedLandmark.id)}>Duplicate</button>
+                    <button onClick={() => void deleteObject("landmark", selectedLandmark.id)}>Delete</button>
+                  </div>
+                  <label>
+                    Name
+                    <input value={selectedLandmark.name} disabled={!draft} onChange={(event) => updateLandmarkField("name", event.target.value)} />
+                  </label>
+                  <label>
+                    Tags
+                    <input value={(selectedLandmark.tags ?? []).join(", ")} disabled={!draft} onChange={(event) => updateLandmarkField("tags", csvList(event.target.value))} />
+                  </label>
+                  <label>
+                    Lat
+                    <input type="number" value={selectedLandmark.lat ?? 0} disabled={!draft} onChange={(event) => updateLandmarkField("lat", Number(event.target.value))} />
+                  </label>
+                  <label>
+                    Lng
+                    <input type="number" value={selectedLandmark.lng ?? 0} disabled={!draft} onChange={(event) => updateLandmarkField("lng", Number(event.target.value))} />
+                  </label>
+                </>
+              ) : null}
+            </>
+          ) : (
+            <p className="muted">No authored landmarks yet. Add one from the toolbar.</p>
+          )}
+        </div>
+
+        <div className="panel">
+          <h2>Air Inventories</h2>
+          {inventories.length ? (
+            <>
+              <select value={selectedInventoryId} onChange={(event) => setSelectedInventoryId(event.target.value)}>
+                {inventories.map((inventory: any) => (
+                  <option key={inventory.id} value={inventory.id}>
+                    {inventory.id}
+                  </option>
+                ))}
+              </select>
+              {selectedInventory ? (
+                <>
+                  <div className="button-row">
+                    <button onClick={() => void duplicateObject("air_package_inventory", selectedInventory.id)}>Duplicate</button>
+                    <button onClick={() => void deleteObject("air_package_inventory", selectedInventory.id)}>Delete</button>
+                  </div>
+                  <label>
+                    Coalition
+                    <select value={selectedInventory.coalition} disabled={!draft} onChange={(event) => updateInventoryField(selectedInventory.id, "coalition", event.target.value)}>
+                      <option value="red">REDFOR</option>
+                      <option value="blue">BLUFOR</option>
+                    </select>
+                  </label>
+                  <label>
+                    Origin Control Point
+                    <select value={selectedInventory.origin_control_point_id} disabled={!draft} onChange={(event) => updateInventoryField(selectedInventory.id, "origin_control_point_id", event.target.value)}>
+                      {controlPoints.map((point: any) => (
+                        <option key={point.id} value={point.id}>
+                          {point.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    Aircraft Type
+                    <input value={selectedInventory.aircraft_type} disabled={!draft} onChange={(event) => updateInventoryField(selectedInventory.id, "aircraft_type", event.target.value)} />
+                  </label>
+                  <label>
+                    Category
+                    <select value={selectedInventory.aircraft_category} disabled={!draft} onChange={(event) => updateInventoryField(selectedInventory.id, "aircraft_category", event.target.value)}>
+                      <option value="fixed_wing">Fixed Wing</option>
+                      <option value="helicopter">Helicopter</option>
+                    </select>
+                  </label>
+                  <label>
+                    Available Count
+                    <input type="number" value={selectedInventory.available_count} disabled={!draft} onChange={(event) => updateInventoryField(selectedInventory.id, "available_count", Number(event.target.value))} />
+                  </label>
+                  <label>
+                    Package Types
+                    <input value={(selectedInventory.package_types ?? []).join(", ")} disabled={!draft} onChange={(event) => updateInventoryField(selectedInventory.id, "package_types", csvList(event.target.value))} />
+                  </label>
+                  <label>
+                    Default Altitude
+                    <input type="number" value={selectedInventory.default_altitude_ft_msl ?? 0} disabled={!draft} onChange={(event) => updateInventoryField(selectedInventory.id, "default_altitude_ft_msl", Number(event.target.value))} />
+                  </label>
+                </>
+              ) : null}
+            </>
+          ) : (
+            <p className="muted">No air inventories yet. Add one from the toolbar.</p>
+          )}
+        </div>
+
+        <div className="panel">
+          <h2>Air Presets</h2>
+          {presets.length ? (
+            <>
+              <select value={selectedPresetId} onChange={(event) => setSelectedPresetId(event.target.value)}>
+                {presets.map((preset: any) => (
+                  <option key={preset.id} value={preset.id}>
+                    {preset.name}
+                  </option>
+                ))}
+              </select>
+              {selectedPreset ? (
+                <>
+                  <div className="button-row">
+                    <button onClick={() => void duplicateObject("air_package_preset", selectedPreset.id)}>Duplicate</button>
+                    <button onClick={() => void deleteObject("air_package_preset", selectedPreset.id)}>Delete</button>
+                  </div>
+                  <label>
+                    Name
+                    <input value={selectedPreset.name} disabled={!draft} onChange={(event) => updatePresetField(selectedPreset.id, "name", event.target.value)} />
+                  </label>
+                  <label>
+                    Coalition
+                    <select value={selectedPreset.coalition} disabled={!draft} onChange={(event) => updatePresetField(selectedPreset.id, "coalition", event.target.value)}>
+                      <option value="red">REDFOR</option>
+                      <option value="blue">BLUFOR</option>
+                    </select>
+                  </label>
+                  <label>
+                    Inventory
+                    <select value={selectedPreset.inventory_id} disabled={!draft} onChange={(event) => updatePresetField(selectedPreset.id, "inventory_id", event.target.value)}>
+                      {inventories.map((inventory: any) => (
+                        <option key={inventory.id} value={inventory.id}>
+                          {inventory.id}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    Package Type
+                    <input value={selectedPreset.package_type} disabled={!draft} onChange={(event) => updatePresetField(selectedPreset.id, "package_type", event.target.value)} />
+                  </label>
+                  <label>
+                    Aircraft Count
+                    <input type="number" value={selectedPreset.aircraft_count} disabled={!draft} onChange={(event) => updatePresetField(selectedPreset.id, "aircraft_count", Number(event.target.value))} />
+                  </label>
+                  <label>
+                    Posture
+                    <input value={selectedPreset.posture ?? ""} disabled={!draft} onChange={(event) => updatePresetField(selectedPreset.id, "posture", event.target.value)} />
+                  </label>
+                  <label>
+                    ROE
+                    <input value={selectedPreset.roe ?? ""} disabled={!draft} onChange={(event) => updatePresetField(selectedPreset.id, "roe", event.target.value)} />
+                  </label>
+                  <label>
+                    Description
+                    <input value={selectedPreset.description ?? ""} disabled={!draft} onChange={(event) => updatePresetField(selectedPreset.id, "description", event.target.value)} />
+                  </label>
+                  <div className="stack">
+                    {(selectedPreset.route_legs ?? []).map((leg: any, index: number) => (
+                      <div key={`${selectedPreset.id}-leg-${index}`} className="route-leg-card">
+                        <label>
+                          Leg {index + 1} Type
+                          <input value={leg.reference_type} disabled={!draft} onChange={(event) => updatePresetRouteLeg(selectedPreset.id, index, "reference_type", event.target.value)} />
+                        </label>
+                        <label>
+                          Reference
+                          <input value={leg.reference_id ?? ""} disabled={!draft} onChange={(event) => updatePresetRouteLeg(selectedPreset.id, index, "reference_id", event.target.value)} />
+                        </label>
+                        <label>
+                          Altitude
+                          <input type="number" value={leg.altitude_ft_msl ?? 0} disabled={!draft} onChange={(event) => updatePresetRouteLeg(selectedPreset.id, index, "altitude_ft_msl", Number(event.target.value))} />
+                        </label>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              ) : null}
+            </>
+          ) : (
+            <p className="muted">No air presets yet. Add one from the toolbar.</p>
           )}
         </div>
 

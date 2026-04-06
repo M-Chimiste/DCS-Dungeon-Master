@@ -339,6 +339,11 @@ button:hover {
   stroke-width: 1;
 }
 
+.landmark-mark.selected {
+  stroke: #8c2f39;
+  stroke-width: 2;
+}
+
 .air-package-route {
   fill: none;
   stroke-width: 3;
@@ -346,6 +351,10 @@ button:hover {
   stroke-linejoin: round;
   stroke-dasharray: 12 8;
   opacity: 0.95;
+}
+
+.air-package-route.selected {
+  stroke-width: 5;
 }
 
 .air-package-route.red {
@@ -509,14 +518,246 @@ select {
   gap: 0.4rem;
 }
 
+.ops-grid-expanded {
+  grid-template-columns: 280px minmax(0, 1.3fr) 420px;
+}
+
+.field span {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #7b6246;
+}
+
+.two-col-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.interactive-map-card {
+  position: relative;
+  padding: 0.9rem;
+}
+
+.map-shell {
+  position: relative;
+  height: 580px;
+  border-radius: 18px;
+  overflow: hidden;
+  border: 1px solid rgba(114, 84, 58, 0.18);
+  background: linear-gradient(180deg, rgba(255, 252, 246, 0.94), rgba(239, 225, 191, 0.9));
+}
+
+.leaflet-map {
+  height: 100%;
+  width: 100%;
+}
+
+.map-floating-controls {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  z-index: 700;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.map-floating-controls button {
+  padding: 0.55rem 0.8rem;
+  border-radius: 12px;
+  background: rgba(255, 251, 244, 0.94);
+  color: #2f2a24;
+}
+
+.map-floating-controls button:hover {
+  background: #8c2f39;
+  color: #fffdf8;
+}
+
+.map-legend {
+  position: absolute;
+  left: 14px;
+  bottom: 14px;
+  z-index: 700;
+  width: min(280px, calc(100% - 28px));
+  background: rgba(255, 252, 246, 0.94);
+  border: 1px solid rgba(114, 84, 58, 0.16);
+  border-radius: 14px;
+  padding: 0.8rem 0.9rem;
+  box-shadow: 0 14px 30px rgba(74, 56, 40, 0.12);
+}
+
+.legend-title {
+  font-weight: 700;
+  margin-bottom: 0.55rem;
+}
+
+.legend-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.84rem;
+  color: #4b4237;
+}
+
+.legend-swatch,
+.legend-line,
+.legend-dot {
+  display: inline-block;
+  flex: 0 0 auto;
+}
+
+.legend-swatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  border: 1px solid rgba(114, 84, 58, 0.22);
+}
+
+.legend-swatch.front {
+  background: #d47a62;
+}
+
+.legend-swatch.blue {
+  background: #2b6cb0;
+}
+
+.legend-swatch.red {
+  background: #a72637;
+}
+
+.legend-swatch.terrain {
+  background: rgba(180, 83, 9, 0.48);
+}
+
+.legend-line {
+  width: 22px;
+  height: 0;
+  border-top: 3px dashed #8c2f39;
+}
+
+.legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: #374151;
+}
+
+.map-mode-badge {
+  display: inline-flex;
+  margin-bottom: 0.55rem;
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
+  background: #efe4c9;
+  color: #6a5031;
+  font-size: 0.8rem;
+}
+
+.drag-handle {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  color: #fffdf8;
+  font-size: 0.74rem;
+  font-weight: 700;
+  border: 2px solid rgba(255, 250, 243, 0.94);
+  box-shadow: 0 8px 16px rgba(40, 32, 26, 0.16);
+}
+
+.drag-handle.red {
+  background: #a72637;
+}
+
+.drag-handle.blue {
+  background: #2b6cb0;
+}
+
+.drag-handle.amber {
+  background: #c57f17;
+}
+
+.drag-handle.stone {
+  background: #5b6472;
+}
+
+.map-tooltip {
+  border-radius: 10px;
+  border: 1px solid rgba(114, 84, 58, 0.18);
+  box-shadow: 0 10px 18px rgba(74, 56, 40, 0.08);
+}
+
+.sector-tooltip {
+  text-align: center;
+}
+
+.preview-image-card {
+  margin: 0;
+}
+
+.preview-image-card figcaption {
+  margin-top: 0.35rem;
+  font-size: 0.78rem;
+  color: #6f6256;
+}
+
+.package-group + .package-group {
+  margin-top: 0.8rem;
+  padding-top: 0.8rem;
+  border-top: 1px solid rgba(114, 84, 58, 0.14);
+}
+
+.package-detail-panel {
+  margin-top: 0.8rem;
+}
+
+.route-leg-card,
+.callout-note {
+  border: 1px solid rgba(114, 84, 58, 0.14);
+  border-radius: 12px;
+  padding: 0.75rem;
+  background: rgba(255, 252, 246, 0.92);
+}
+
+.callout-note.warning {
+  background: #fff1d8;
+  color: #74491b;
+}
+
+.callout-result {
+  border-radius: 14px;
+  padding: 0.9rem;
+  background: linear-gradient(180deg, #fff5e7, #f8ead4);
+  border: 1px solid rgba(114, 84, 58, 0.18);
+}
+
+.leaflet-container {
+  font: inherit;
+}
+
+.leaflet-control-attribution {
+  display: none;
+}
+
 @media (max-width: 1200px) {
   .studio-grid,
   .setup-grid,
-  .ops-grid {
+  .ops-grid,
+  .ops-grid-expanded {
     grid-template-columns: 1fr;
   }
 
   .preview-row {
+    grid-template-columns: 1fr;
+  }
+
+  .map-shell {
+    height: 460px;
+  }
+
+  .two-col-grid {
     grid-template-columns: 1fr;
   }
 }

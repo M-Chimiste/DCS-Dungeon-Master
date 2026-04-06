@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, is_dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 import hashlib
 import json
 from pathlib import Path
 from typing import Any
 
+import httpx
+
+from dcs_dungeon_master.action_validation import ActionValidator
 from dcs_dungeon_master.app import DEFAULT_CONFIG_PATH
 from dcs_dungeon_master.core.config import AppConfig, load_config
 from dcs_dungeon_master.core.enums import Coalition, ModelHostingMode, RunLifecycleStatus
@@ -28,12 +31,20 @@ from dcs_dungeon_master.core.models import (
     ScenarioDraftPatch,
 )
 from dcs_dungeon_master.evaluation import build_evaluation_metadata
+from dcs_dungeon_master.execution import ExecutionEngine
+from dcs_dungeon_master.integration.olympus import OlympusClient
 from dcs_dungeon_master.map_assets import MapAssetService
 from dcs_dungeon_master.model_adapter import build_model_registry
 from dcs_dungeon_master.operator_control import OperatorControlService
 from dcs_dungeon_master.persistence import SQLiteStateStore
 from dcs_dungeon_master.run_continuation import RunContinuationService
-from dcs_dungeon_master.scenario_state.registry import get_scenario_definition, list_scenarios, scenario_definition_to_dict
+from dcs_dungeon_master.scenario_state.registry import (
+    get_scenario_definition,
+    list_scenarios,
+    load_scenario_definition_data,
+    scenario_definition_to_dict,
+    serialize_scenario_definition_toml,
+)
 from dcs_dungeon_master.setup_wizard import SetupWizardService
 from dcs_dungeon_master.terrain import TerrainService
 from dcs_dungeon_master.web_ui.pydcs_reference import PydcsReferenceService
@@ -127,6 +138,57 @@ class WebUiService:
             "control_points": _json_ready(self._campaign_control_point_views(scenario)),
             "force_policies": _json_ready(self._force_policy_views(scenario)),
         }
+
+    def save_air_package_preset(self, scenario_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        scenario, scenario_path = self._load_editable_scenario(scenario_id)
+        scenario_payload = scenario_definition_to_dict(scenario)
+        preset_payload = payload.get("preset", payload)
+        if not isinstance(preset_payload, dict):
+            raise PersistenceError("preset payload must be an object.")
+        preset_id = str(preset_payload.get("id", "")).strip()
+        if not preset_id:
+            preset_id = self._unique_id(
+                [str(item.get("id")) for item in scenario_payload.get("air_package_presets", [])],
+                "air_preset",
+            )
+        normalized_preset = {
+            "id": preset_id,
+            "coalition": str(preset_payload.get("coalition", "")).strip(),
+            "name": str(preset_payload.get("name", "")).strip(),
+            "description": preset_payload.get("description"),
+            "inventory_id": str(preset_payload.get("inventory_id", "")).strip(),
+            "package_type": str(preset_payload.get("package_type", "")).strip(),
+            "aircraft_count": int(preset_payload.get("aircraft_count", 0)),
+            "route_legs": tuple(
+                dict(item) for item in preset_payload.get("route_legs", ()) if isinstance(item, dict)
+            ),
+            "target_reference_type": preset_payload.get("target_reference_type"),
+            "target_reference_id": preset_payload.get("target_reference_id"),
+            "posture": str(preset_payload.get("posture", "push")).strip() or "push",
+            "roe": str(preset_payload.get("roe", "tight")).strip() or "tight",
+        }
+        if not normalized_preset["coalition"] or not normalized_preset["name"] or not normalized_preset["inventory_id"]:
+            raise PersistenceError("Preset coalition, name, and inventory_id are required.")
+        presets = [dict(item) for item in scenario_payload.get("air_package_presets", []) if item.get("id") != preset_id]
+        presets.append(normalized_preset)
+        scenario_payload["air_package_presets"] = presets
+        validated = load_scenario_definition_data(scenario_payload, context=f"Scenario '{scenario_id}'")
+        scenario_path.write_text(serialize_scenario_definition_toml(validated), encoding="utf-8")
+        saved = next(item for item in scenario_definition_to_dict(validated)["air_package_presets"] if item["id"] == preset_id)
+        return {"saved": True, "preset": saved, "scenario": scenario_definition_to_dict(validated)}
+
+    def delete_air_package_preset(self, scenario_id: str, preset_id: str) -> dict[str, Any]:
+        scenario, scenario_path = self._load_editable_scenario(scenario_id)
+        scenario_payload = scenario_definition_to_dict(scenario)
+        before_count = len(scenario_payload.get("air_package_presets", []))
+        scenario_payload["air_package_presets"] = [
+            item for item in scenario_payload.get("air_package_presets", []) if item.get("id") != preset_id
+        ]
+        if len(scenario_payload["air_package_presets"]) == before_count:
+            raise PersistenceError(f"Unknown air package preset '{preset_id}'.")
+        validated = load_scenario_definition_data(scenario_payload, context=f"Scenario '{scenario_id}'")
+        scenario_path.write_text(serialize_scenario_definition_toml(validated), encoding="utf-8")
+        return {"deleted": True, "preset_id": preset_id, "scenario": scenario_definition_to_dict(validated)}
 
     def create_scenario_draft(self, payload: dict[str, Any]) -> dict[str, Any]:
         if isinstance(payload.get("blank_scenario"), dict):
@@ -429,6 +491,85 @@ class WebUiService:
     def get_model_invocations(self, run_id: str) -> dict[str, Any]:
         return {"model_invocations": _json_ready(self.store.list_model_invocations(run_id))}
 
+    def submit_operator_actions(self, run_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        run = self.operator.get_status(run_id)
+        if run.status in {RunLifecycleStatus.STOPPED, RunLifecycleStatus.FAILED}:
+            raise PersistenceError(f"Run '{run_id}' is terminal with status '{run.status.value}'.")
+        coalition_raw = payload.get("coalition")
+        if not isinstance(coalition_raw, str) or not coalition_raw.strip():
+            raise PersistenceError("coalition is required.")
+        coalition = Coalition(coalition_raw.strip())
+        actions = payload.get("actions")
+        if not isinstance(actions, list) or not actions:
+            raise PersistenceError("actions must be a non-empty array.")
+        scenario = get_scenario_definition(run.scenario_id, self.registry_path)
+        decision_cycle = max(self.operator.summarize_run(run_id).latest_decision_cycle, 1)
+        submitted_at = datetime.now(UTC)
+        validator = ActionValidator(
+            self.store,
+            scenario,
+            map_asset_service=self.map_asset_service,
+            terrain_service=self.terrain_service,
+            air_ops=self.config.air_ops,
+        )
+        validation_batch = validator.validate_payload(
+            run_id,
+            coalition,
+            decision_cycle,
+            {"actions": actions},
+            persist=True,
+            submitted_at=submitted_at,
+        )
+        execution_batch = None
+        if any(result.status.value in {"accepted", "partially_accepted"} for result in validation_batch.results):
+            execution_engine = self._build_execution_engine(run.mode == "dry", scenario)
+            try:
+                execution_batch = execution_engine.execute_validation_batch(
+                    run_id,
+                    coalition,
+                    decision_cycle,
+                    validation_batch,
+                    model_invocation_id=None,
+                    observation_id=None,
+                    simulate_only=run.mode == "dry",
+                    now=submitted_at,
+                )
+            finally:
+                execution_engine.olympus.close()
+        self.store.record_operator_action_submission(
+            run_id,
+            coalition=coalition,
+            decision_cycle=decision_cycle,
+            submitted_at=submitted_at,
+            action_ids=tuple(result.action_id for result in validation_batch.results),
+            validation_batch_id=validation_batch.id,
+            execution_batch_id=execution_batch.id if execution_batch is not None else None,
+        )
+        return {
+            "submitted_at": submitted_at.isoformat(),
+            "run_id": run_id,
+            "mode": run.mode,
+            "coalition": coalition.value,
+            "decision_cycle": decision_cycle,
+            "validation": _json_ready(validation_batch),
+            "execution": _json_ready(execution_batch) if execution_batch is not None else None,
+            "air_packages": _json_ready(self.store.list_air_packages(run_id, coalition)),
+            "operator_action_summary": {
+                "accepted_count": sum(result.status.value == "accepted" for result in validation_batch.results),
+                "partially_accepted_count": sum(
+                    result.status.value == "partially_accepted" for result in validation_batch.results
+                ),
+                "rejected_count": sum(result.status.value == "rejected" for result in validation_batch.results),
+                "warnings": [
+                    _json_ready(message)
+                    for result in validation_batch.results
+                    for message in result.messages
+                    if getattr(message, "level", None) == "warning"
+                ],
+            },
+            "ops": _json_ready(self.get_live_ops_snapshot(run_id)["ops"]),
+        }
+
     def _resolve_run_routing(
         self,
         payload: dict[str, Any],
@@ -609,6 +750,10 @@ class WebUiService:
                 return (200, self.duplicate_scenario_object(segments[3], segments[5], segments[6], body))
             if method == "GET" and len(segments) == 3 and segments[1] == "scenarios":
                 return (200, self.get_scenario(segments[2]))
+            if method == "POST" and len(segments) == 4 and segments[1] == "scenarios" and segments[3] == "air-package-presets":
+                return (200, self.save_air_package_preset(segments[2], body))
+            if method == "DELETE" and len(segments) == 5 and segments[1] == "scenarios" and segments[3] == "air-package-presets":
+                return (200, self.delete_air_package_preset(segments[2], segments[4]))
             if method == "GET" and segments == ["api", "theaters"]:
                 return (200, self.list_theaters())
             if method == "GET" and len(segments) == 4 and segments[1] == "theaters" and segments[3] == "reference":
@@ -656,6 +801,8 @@ class WebUiService:
                     return (200, self.get_validation(run_id))
                 if method == "GET" and tail == ["model-invocations"]:
                     return (200, self.get_model_invocations(run_id))
+                if method == "POST" and tail == ["operator-actions"]:
+                    return (200, self.submit_operator_actions(run_id, body))
         except (PersistenceError, ScenarioNotFoundError, ValueError) as exc:
             return (400, {"error": str(exc)})
         return (404, {"error": "Unknown route."})
@@ -871,3 +1018,25 @@ class WebUiService:
         except Exception:  # noqa: BLE001
             return None
         return f"/attachments/{relative.as_posix()}"
+
+    def _load_editable_scenario(self, scenario_id: str):
+        for entry in list_scenarios(self.registry_path):
+            if entry.id == scenario_id:
+                return (get_scenario_definition(scenario_id, self.registry_path), entry.path)
+        raise ScenarioNotFoundError(f"Unknown scenario id: {scenario_id}")
+
+    def _unique_id(self, existing_ids: list[str], prefix: str) -> str:
+        existing = set(existing_ids)
+        index = 1
+        while True:
+            candidate = f"{prefix}_{index}"
+            if candidate not in existing:
+                return candidate
+            index += 1
+
+    def _build_execution_engine(self, simulate_only: bool, scenario):
+        transport = None
+        if simulate_only:
+            transport = httpx.MockTransport(lambda request: httpx.Response(200, json={"accepted": True, "path": request.url.path}))
+        olympus = OlympusClient(self.config.dcs.olympus, transport=transport)
+        return ExecutionEngine(self.store, scenario, olympus)

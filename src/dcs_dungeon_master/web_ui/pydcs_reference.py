@@ -21,7 +21,7 @@ class PydcsReferenceService:
         default_center_lat, default_center_lng, default_radius_nm = self._default_view(scenario)
         airports: tuple[dict[str, Any], ...] = ()
         basemap = None
-        landmarks: tuple[dict[str, Any], ...] = ()
+        bundle_landmarks: tuple[dict[str, Any], ...] = ()
         terrain_summary: tuple[dict[str, Any], ...] = ()
         status = "unsupported"
         message = "Using authored fallback reference data only."
@@ -49,12 +49,32 @@ class PydcsReferenceService:
                     "image_url": self.map_asset_service.public_url_for_path(basemap_path),
                     "image_path": str(basemap_path),
                 }
-                landmarks = tuple(bundle.landmarks)
+                bundle_landmarks = tuple(bundle.landmarks)
                 if self.terrain_service is not None:
                     terrain_summary = self.terrain_service.sector_terrain_summary(bundle, scenario.sectors)
                 if status == "unsupported":
                     status = "partial"
                 message = "Loaded authored map asset bundle with local basemap and terrain metadata."
+
+        scenario_landmarks = tuple(
+            {
+                "id": landmark.id,
+                "name": landmark.name,
+                "lat": landmark.lat,
+                "lng": landmark.lng,
+                "tags": landmark.tags,
+                "source": "scenario",
+            }
+            for landmark in scenario.landmarks
+        )
+        landmarks = scenario_landmarks + tuple(
+            {
+                **item,
+                "source": item.get("source", "theater_asset"),
+            }
+            for item in bundle_landmarks
+            if str(item.get("id")) not in {landmark.id for landmark in scenario.landmarks}
+        )
 
         return MapReferenceLayer(
             theater_id=scenario.theater,
@@ -117,6 +137,17 @@ class PydcsReferenceService:
             sectors=(),
             control_points=(),
             zones=(),
+            landmarks=tuple(
+                {
+                    "id": landmark.id,
+                    "name": landmark.name,
+                    "lat": landmark.lat,
+                    "lng": landmark.lng,
+                    "tags": landmark.tags,
+                    "source": "scenario",
+                }
+                for landmark in scenario.landmarks
+            ) or reference.landmarks,
         )
 
     def _default_view(self, scenario: ScenarioDefinition) -> tuple[float | None, float | None, float | None]:
@@ -136,6 +167,9 @@ class PydcsReferenceService:
             latitudes.append(zone.center_lat)
             longitudes.append(zone.center_lng)
             radii.append(zone.radius_nm)
+        for landmark in scenario.landmarks:
+            latitudes.append(landmark.lat)
+            longitudes.append(landmark.lng)
         if not latitudes or not longitudes:
             return (None, None, None)
         return (

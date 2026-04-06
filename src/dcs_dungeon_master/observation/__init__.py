@@ -80,7 +80,7 @@ class ObservationBuilder:
         previous_artifact = self.store.get_previous_observation(run_id, coalition, decision_cycle)
         asset_bundle = self.map_asset_service.bundle_for_theater(self.scenario.theater) if self.map_asset_service is not None else None
         terrain_summary = self.terrain_service.sector_terrain_summary(asset_bundle, self.scenario.sectors) if self.terrain_service is not None else ()
-        landmarks = tuple(asset_bundle.landmarks) if asset_bundle is not None else ()
+        landmarks = self._combined_landmarks(asset_bundle)
         map_context = self._build_map_context(asset_bundle, coalition)
 
         sector_summary = self._build_sector_summary(world, knowledge, coalition, previous_artifact)
@@ -655,10 +655,34 @@ class ObservationBuilder:
             "recommended_image_roles": ["map_theater_context", "map_front_aoi", "map_overlay"],
             "water_context": [
                 landmark["name"]
-                for landmark in (asset_bundle.landmarks if asset_bundle is not None else ())
+                for landmark in self._combined_landmarks(asset_bundle)
                 if "water" in set(landmark.get("tags", ()))
             ][:3],
         }
+
+    def _combined_landmarks(self, asset_bundle: TheaterAssetBundle | None) -> tuple[dict[str, Any], ...]:
+        scenario_landmarks = tuple(
+            {
+                "id": landmark.id,
+                "name": landmark.name,
+                "lat": landmark.lat,
+                "lng": landmark.lng,
+                "tags": landmark.tags,
+                "source": "scenario",
+            }
+            for landmark in self.scenario.landmarks
+        )
+        if asset_bundle is None:
+            return scenario_landmarks
+        scenario_ids = {landmark.id for landmark in self.scenario.landmarks}
+        return scenario_landmarks + tuple(
+            {
+                **item,
+                "source": item.get("source", "theater_asset"),
+            }
+            for item in asset_bundle.landmarks
+            if str(item.get("id")) not in scenario_ids
+        )
 
     @staticmethod
     def _serialize_air_package(package: AirPackageState) -> dict[str, Any]:

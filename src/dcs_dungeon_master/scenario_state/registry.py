@@ -12,11 +12,14 @@ from dcs_dungeon_master.core.exceptions import ConfigError, ScenarioNotFoundErro
 from dcs_dungeon_master.core.models import (
     ActiveGroupState,
     AirPackageInventoryState,
+    AirPackagePresetState,
+    AirRouteLeg,
     CoalitionState,
     ControlPointState,
     DeploymentRestrictionState,
     ReserveGroupState,
     ScenarioDefinition,
+    ScenarioLandmarkState,
     ScenarioZone,
     SectorState,
     StandingOrderState,
@@ -134,6 +137,8 @@ def load_scenario_definition_data(raw: dict[str, Any], *, context: str = "Scenar
     zones_raw = raw.get("zones", [])
     restrictions_raw = raw.get("deployment_restrictions", [])
     air_package_inventories_raw = raw.get("air_package_inventories", [])
+    landmarks_raw = raw.get("landmarks", [])
+    air_package_presets_raw = raw.get("air_package_presets", [])
 
     if not sectors_raw or not isinstance(sectors_raw, list):
         raise ConfigError(f"{context}: 'sectors' must be a non-empty array of tables.")
@@ -150,6 +155,8 @@ def load_scenario_definition_data(raw: dict[str, Any], *, context: str = "Scenar
     zones = tuple(_parse_zone(item, context) for item in zones_raw)
     restrictions = tuple(_parse_restriction(item, context) for item in restrictions_raw)
     air_package_inventories = tuple(_parse_air_package_inventory(item, context) for item in air_package_inventories_raw)
+    landmarks = tuple(_parse_landmark(item, context) for item in landmarks_raw)
+    air_package_presets = tuple(_parse_air_package_preset(item, context) for item in air_package_presets_raw)
 
     sector_ids = {sector.id for sector in sectors}
     coalition_ids = {coalition.coalition for coalition in coalitions}
@@ -201,6 +208,33 @@ def load_scenario_definition_data(raw: dict[str, Any], *, context: str = "Scenar
             raise ConfigError(
                 f"{context}: air package inventory '{inventory.id}' references unknown control point '{inventory.origin_control_point_id}'."
             )
+    inventory_ids = {inventory.id for inventory in air_package_inventories}
+    zone_ids = {zone.id for zone in zones}
+    for preset in air_package_presets:
+        if preset.coalition not in coalition_ids:
+            raise ConfigError(
+                f"{context}: air package preset '{preset.id}' references unknown coalition '{preset.coalition}'."
+            )
+        if preset.inventory_id not in inventory_ids:
+            raise ConfigError(
+                f"{context}: air package preset '{preset.id}' references unknown inventory '{preset.inventory_id}'."
+            )
+        inventory = next(item for item in air_package_inventories if item.id == preset.inventory_id)
+        if inventory.coalition is not preset.coalition:
+            raise ConfigError(
+                f"{context}: air package preset '{preset.id}' coalition does not match inventory '{preset.inventory_id}'."
+            )
+        for leg in preset.route_legs:
+            if leg.reference_type == "sector" and leg.reference_id not in sector_ids:
+                raise ConfigError(f"{context}: air package preset '{preset.id}' references unknown sector '{leg.reference_id}'.")
+            if leg.reference_type == "control_point" and leg.reference_id not in control_point_ids:
+                raise ConfigError(
+                    f"{context}: air package preset '{preset.id}' references unknown control point '{leg.reference_id}'."
+                )
+            if leg.reference_type == "zone" and leg.reference_id not in zone_ids:
+                raise ConfigError(f"{context}: air package preset '{preset.id}' references unknown zone '{leg.reference_id}'.")
+            # Landmark references may point at scenario-authored landmarks or theater asset bundles
+            # that are loaded later at runtime, so they are validated more fully by the map/terrain services.
 
     return ScenarioDefinition(
         id=_require_non_empty_string(raw, "id", context),
@@ -216,6 +250,8 @@ def load_scenario_definition_data(raw: dict[str, Any], *, context: str = "Scenar
         zones=zones,
         deployment_restrictions=restrictions,
         air_package_inventories=air_package_inventories,
+        landmarks=landmarks,
+        air_package_presets=air_package_presets,
     )
 
 
@@ -313,6 +349,16 @@ def scenario_definition_to_dict(scenario: ScenarioDefinition) -> dict[str, Any]:
             }
             for zone in scenario.zones
         ],
+        "landmarks": [
+            {
+                "id": item.id,
+                "name": item.name,
+                "lat": item.lat,
+                "lng": item.lng,
+                "tags": list(item.tags),
+            }
+            for item in scenario.landmarks
+        ],
         "air_package_inventories": [
             {
                 "id": item.id,
@@ -325,6 +371,36 @@ def scenario_definition_to_dict(scenario: ScenarioDefinition) -> dict[str, Any]:
                 "default_altitude_ft_msl": item.default_altitude_ft_msl,
             }
             for item in scenario.air_package_inventories
+        ],
+        "air_package_presets": [
+            {
+                "id": item.id,
+                "coalition": item.coalition.value,
+                "name": item.name,
+                "description": item.description,
+                "inventory_id": item.inventory_id,
+                "package_type": item.package_type,
+                "aircraft_count": item.aircraft_count,
+                "route_legs": [
+                    {
+                        "leg_id": leg.leg_id,
+                        "reference_type": leg.reference_type,
+                        "reference_id": leg.reference_id,
+                        "lat": leg.lat,
+                        "lng": leg.lng,
+                        "altitude_ft_msl": leg.altitude_ft_msl,
+                        "task": leg.task,
+                        "note": leg.note,
+                        "metadata": leg.metadata or None,
+                    }
+                    for leg in item.route_legs
+                ],
+                "target_reference_type": item.target_reference_type,
+                "target_reference_id": item.target_reference_id,
+                "posture": item.posture,
+                "roe": item.roe,
+            }
+            for item in scenario.air_package_presets
         ],
         "deployment_restrictions": [
             {
@@ -354,6 +430,12 @@ def serialize_scenario_definition_toml(scenario: ScenarioDefinition) -> str:
     _append_table_array(lines, "reserve_groups", data["reserve_groups"])
     if data["zones"]:
         _append_table_array(lines, "zones", data["zones"])
+    if data["landmarks"]:
+        _append_table_array(lines, "landmarks", data["landmarks"])
+    if data["air_package_inventories"]:
+        _append_table_array(lines, "air_package_inventories", data["air_package_inventories"])
+    if data["air_package_presets"]:
+        _append_table_array(lines, "air_package_presets", data["air_package_presets"])
     if data["deployment_restrictions"]:
         _append_table_array(lines, "deployment_restrictions", data["deployment_restrictions"])
     return "\n".join(lines).strip() + "\n"
@@ -543,6 +625,22 @@ def _parse_zone(data: dict[str, Any], context: str) -> ScenarioZone:
     )
 
 
+def _parse_landmark(data: dict[str, Any], context: str) -> ScenarioLandmarkState:
+    if not isinstance(data, dict):
+        raise ConfigError(f"{context}: landmark entries must be tables.")
+    lat = data.get("lat")
+    lng = data.get("lng")
+    if not isinstance(lat, int | float) or not isinstance(lng, int | float):
+        raise ConfigError(f"{context}: landmark coordinates must be numeric.")
+    return ScenarioLandmarkState(
+        id=_require_non_empty_string(data, "id", context),
+        name=_require_non_empty_string(data, "name", context),
+        lat=float(lat),
+        lng=float(lng),
+        tags=_optional_string_list(data, "tags", context),
+    )
+
+
 def _parse_air_package_inventory(data: dict[str, Any], context: str) -> AirPackageInventoryState:
     if not isinstance(data, dict):
         raise ConfigError(f"{context}: air package inventory entries must be tables.")
@@ -561,4 +659,60 @@ def _parse_air_package_inventory(data: dict[str, Any], context: str) -> AirPacka
         available_count=available_count,
         package_types=_optional_string_list(data, "package_types", context),
         default_altitude_ft_msl=default_altitude,
+    )
+
+
+def _parse_air_package_preset(data: dict[str, Any], context: str) -> AirPackagePresetState:
+    if not isinstance(data, dict):
+        raise ConfigError(f"{context}: air package preset entries must be tables.")
+    aircraft_count = data.get("aircraft_count")
+    if not isinstance(aircraft_count, int) or aircraft_count <= 0:
+        raise ConfigError(f"{context}: air package preset 'aircraft_count' must be a positive integer.")
+    route_legs_raw = data.get("route_legs", [])
+    if not isinstance(route_legs_raw, list):
+        raise ConfigError(f"{context}: air package preset 'route_legs' must be an array.")
+    return AirPackagePresetState(
+        id=_require_non_empty_string(data, "id", context),
+        coalition=Coalition(_require_non_empty_string(data, "coalition", context)),
+        name=_require_non_empty_string(data, "name", context),
+        description=_optional_string(data, "description"),
+        inventory_id=_require_non_empty_string(data, "inventory_id", context),
+        package_type=_require_non_empty_string(data, "package_type", context),
+        aircraft_count=aircraft_count,
+        route_legs=tuple(_parse_route_leg(item, context) for item in route_legs_raw),
+        target_reference_type=_optional_string(data, "target_reference_type"),
+        target_reference_id=_optional_string(data, "target_reference_id"),
+        posture=_optional_string(data, "posture") or "push",
+        roe=_optional_string(data, "roe") or "tight",
+    )
+
+
+def _parse_route_leg(data: dict[str, Any], context: str) -> AirRouteLeg:
+    if not isinstance(data, dict):
+        raise ConfigError(f"{context}: route leg entries must be tables.")
+    reference_type = _require_non_empty_string(data, "reference_type", context)
+    if reference_type not in {"sector", "control_point", "zone", "landmark", "coordinate"}:
+        raise ConfigError(f"{context}: route leg reference_type '{reference_type}' is unsupported.")
+    altitude = data.get("altitude_ft_msl")
+    if altitude is not None and (not isinstance(altitude, int) or altitude < 0):
+        raise ConfigError(f"{context}: route leg altitude_ft_msl must be a non-negative integer.")
+    lat = _optional_float(data, "lat", context)
+    lng = _optional_float(data, "lng", context)
+    if reference_type == "coordinate" and (lat is None or lng is None):
+        raise ConfigError(f"{context}: coordinate route legs must include lat and lng.")
+    if reference_type != "coordinate" and _optional_string(data, "reference_id") is None:
+        raise ConfigError(f"{context}: non-coordinate route legs must include reference_id.")
+    metadata = data.get("metadata", {})
+    if metadata is not None and not isinstance(metadata, dict):
+        raise ConfigError(f"{context}: route leg metadata must be a table when provided.")
+    return AirRouteLeg(
+        leg_id=_optional_string(data, "leg_id") or "leg",
+        reference_type=reference_type,
+        reference_id=_optional_string(data, "reference_id"),
+        lat=lat,
+        lng=lng,
+        altitude_ft_msl=altitude,
+        task=_optional_string(data, "task"),
+        note=_optional_string(data, "note"),
+        metadata=metadata or {},
     )

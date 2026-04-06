@@ -332,6 +332,9 @@ class ScenarioDraftService:
         elif object_type == "zone":
             created = self._default_zone(current, scenario, payload)
             scenario["zones"].append(created)
+        elif object_type == "landmark":
+            created = self._default_landmark(current, scenario, payload)
+            scenario["landmarks"].append(created)
         elif object_type == "active_group":
             created = self._default_active_group(current, scenario, payload)
             scenario["active_groups"].append(created)
@@ -339,6 +342,12 @@ class ScenarioDraftService:
             created = self._default_reserve_group(current, scenario, payload)
             scenario["reserve_groups"].append(created)
             self._ensure_coalition_reserve_link(scenario, created["coalition"], created["id"])
+        elif object_type == "air_package_inventory":
+            created = self._default_air_package_inventory(current, scenario, payload)
+            scenario["air_package_inventories"].append(created)
+        elif object_type == "air_package_preset":
+            created = self._default_air_package_preset(current, scenario, payload)
+            scenario["air_package_presets"].append(created)
         elif object_type == "deployment_restriction":
             created = self._default_restriction(current, scenario, payload)
             scenario["deployment_restrictions"].append(created)
@@ -401,6 +410,15 @@ class ScenarioDraftService:
                 if isinstance(created.get("center_lng"), int | float):
                     created["center_lng"] = float(created["center_lng"]) + 0.12
                 created["neighbor_ids"] = []
+            if object_type in {"control_point", "zone", "landmark"}:
+                if isinstance(created.get("lat"), int | float):
+                    created["lat"] = float(created["lat"]) + 0.08
+                if isinstance(created.get("lng"), int | float):
+                    created["lng"] = float(created["lng"]) + 0.08
+                if isinstance(created.get("center_lat"), int | float):
+                    created["center_lat"] = float(created["center_lat"]) + 0.08
+                if isinstance(created.get("center_lng"), int | float):
+                    created["center_lng"] = float(created["center_lng"]) + 0.08
             if object_type == "reserve_group":
                 self._ensure_coalition_reserve_link(scenario, created["coalition"], created["id"])
             scenario[collection_key].append(created)
@@ -427,6 +445,24 @@ class ScenarioDraftService:
             scenario["control_points"] = [item for item in scenario["control_points"] if item["id"] != object_id]
         elif object_type == "zone":
             scenario["zones"] = [item for item in scenario["zones"] if item["id"] != object_id]
+        elif object_type == "landmark":
+            dependencies = [
+                item["id"]
+                for item in scenario["air_package_presets"]
+                if any(
+                    leg.get("reference_type") == "landmark" and leg.get("reference_id") == object_id
+                    for leg in item.get("route_legs", [])
+                )
+                or (
+                    item.get("target_reference_type") == "landmark"
+                    and item.get("target_reference_id") == object_id
+                )
+            ]
+            if dependencies:
+                raise PersistenceError(
+                    f"Cannot delete landmark '{object_id}' because it is referenced by presets: {', '.join(sorted(dependencies))}."
+                )
+            scenario["landmarks"] = [item for item in scenario["landmarks"] if item["id"] != object_id]
         elif object_type == "active_group":
             scenario["active_groups"] = [item for item in scenario["active_groups"] if item["id"] != object_id]
         elif object_type == "reserve_group":
@@ -434,6 +470,19 @@ class ScenarioDraftService:
             scenario["reserve_groups"] = [item for item in scenario["reserve_groups"] if item["id"] != object_id]
             coalition = self._require_coalition_dict(scenario, reserve["coalition"])
             coalition["reserve_ids"] = [item for item in coalition.get("reserve_ids", []) if item != object_id]
+        elif object_type == "air_package_inventory":
+            dependencies = [
+                item["id"] for item in scenario["air_package_presets"] if item.get("inventory_id") == object_id
+            ]
+            if dependencies:
+                raise PersistenceError(
+                    f"Cannot delete air package inventory '{object_id}' because presets reference it: {', '.join(sorted(dependencies))}."
+                )
+            scenario["air_package_inventories"] = [
+                item for item in scenario["air_package_inventories"] if item["id"] != object_id
+            ]
+        elif object_type == "air_package_preset":
+            scenario["air_package_presets"] = [item for item in scenario["air_package_presets"] if item["id"] != object_id]
         elif object_type == "deployment_restriction":
             scenario["deployment_restrictions"] = [item for item in scenario["deployment_restrictions"] if item["id"] != object_id]
         elif object_type == "standing_order":
@@ -555,6 +604,9 @@ class ScenarioDraftService:
             "active_groups": [],
             "reserve_groups": [],
             "zones": [],
+            "landmarks": [],
+            "air_package_inventories": [],
+            "air_package_presets": [],
             "deployment_restrictions": [],
         }
 
@@ -574,6 +626,9 @@ class ScenarioDraftService:
             active_groups=(),
             reserve_groups=(),
             zones=(),
+            air_package_inventories=(),
+            landmarks=(),
+            air_package_presets=(),
             deployment_restrictions=(),
         )
         fallback = next((entry for entry in list_scenarios(self.index_path) if entry.theater == theater), None)
@@ -608,6 +663,15 @@ class ScenarioDraftService:
             "active_groups": [dict(item) for item in scenario.get("active_groups", [])],
             "reserve_groups": [dict(item) for item in scenario.get("reserve_groups", [])],
             "zones": [dict(item) for item in scenario.get("zones", [])],
+            "landmarks": [dict(item) for item in scenario.get("landmarks", [])],
+            "air_package_inventories": [dict(item) for item in scenario.get("air_package_inventories", [])],
+            "air_package_presets": [
+                {
+                    **dict(item),
+                    "route_legs": [dict(leg) for leg in item.get("route_legs", [])],
+                }
+                for item in scenario.get("air_package_presets", [])
+            ],
             "deployment_restrictions": [dict(item) for item in scenario.get("deployment_restrictions", [])],
         }
 
@@ -658,6 +722,17 @@ class ScenarioDraftService:
             "tags": [],
         }
 
+    def _default_landmark(self, draft: ScenarioDraftView, scenario: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+        reference = draft.map_reference or self._blank_reference(draft.theater, draft.scenario_id, draft.name, str(scenario.get("summary", "")))
+        landmark_ids = [item["id"] for item in scenario["landmarks"]]
+        return {
+            "id": self._unique_id(landmark_ids, "landmark"),
+            "name": str(payload.get("name", f"Landmark {len(landmark_ids) + 1}")),
+            "lat": self._numeric_value(payload.get("lat"), reference.default_center_lat or 25.0),
+            "lng": self._numeric_value(payload.get("lng"), reference.default_center_lng or 55.0),
+            "tags": list(payload.get("tags", [])),
+        }
+
     def _default_active_group(self, _: ScenarioDraftView, scenario: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
         coalition = str(payload.get("coalition", "red"))
         return {
@@ -686,6 +761,55 @@ class ScenarioDraftService:
             "emergency": bool(payload.get("emergency", False)),
             "attrition_count": int(payload.get("attrition_count", 0)),
             "replacement_pool": int(payload.get("replacement_pool", 0)),
+        }
+
+    def _default_air_package_inventory(self, _: ScenarioDraftView, scenario: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+        coalition = str(payload.get("coalition", "red"))
+        origin_control_point_id = str(payload.get("origin_control_point_id") or "")
+        if not origin_control_point_id:
+            coalition_control_points = [
+                item
+                for item in scenario["control_points"]
+                if item.get("owner") in {None, coalition}
+            ]
+            if not coalition_control_points:
+                raise PersistenceError("Add an air-capable control point before creating an air package inventory.")
+            origin_control_point_id = coalition_control_points[0]["id"]
+        return {
+            "id": self._unique_id([item["id"] for item in scenario["air_package_inventories"]], "air_inventory"),
+            "coalition": coalition,
+            "origin_control_point_id": origin_control_point_id,
+            "aircraft_type": str(payload.get("aircraft_type", "F-16C")),
+            "aircraft_category": str(payload.get("aircraft_category", "fixed_wing")),
+            "available_count": int(payload.get("available_count", 2)),
+            "package_types": list(payload.get("package_types", ["cap", "strike"])),
+            "default_altitude_ft_msl": int(payload.get("default_altitude_ft_msl", 18000)),
+        }
+
+    def _default_air_package_preset(self, _: ScenarioDraftView, scenario: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+        coalition = str(payload.get("coalition", "red"))
+        inventory_id = str(payload.get("inventory_id") or "")
+        if not inventory_id:
+            inventory = next(
+                (item for item in scenario["air_package_inventories"] if item.get("coalition") == coalition),
+                None,
+            )
+            if inventory is None:
+                raise PersistenceError("Create an air package inventory before creating a preset.")
+            inventory_id = str(inventory["id"])
+        return {
+            "id": self._unique_id([item["id"] for item in scenario["air_package_presets"]], "air_preset"),
+            "coalition": coalition,
+            "name": str(payload.get("name", f"{coalition.upper()} Air Preset")),
+            "description": payload.get("description"),
+            "inventory_id": inventory_id,
+            "package_type": str(payload.get("package_type", "cap")),
+            "aircraft_count": int(payload.get("aircraft_count", 2)),
+            "route_legs": [dict(leg) for leg in payload.get("route_legs", []) if isinstance(leg, dict)],
+            "target_reference_type": payload.get("target_reference_type"),
+            "target_reference_id": payload.get("target_reference_id"),
+            "posture": str(payload.get("posture", "push")),
+            "roe": str(payload.get("roe", "tight")),
         }
 
     def _default_restriction(self, _: ScenarioDraftView, scenario: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
@@ -776,8 +900,11 @@ class ScenarioDraftService:
             "sector": "sectors",
             "control_point": "control_points",
             "zone": "zones",
+            "landmark": "landmarks",
             "active_group": "active_groups",
             "reserve_group": "reserve_groups",
+            "air_package_inventory": "air_package_inventories",
+            "air_package_preset": "air_package_presets",
             "deployment_restriction": "deployment_restrictions",
         }
         try:
@@ -790,8 +917,11 @@ class ScenarioDraftService:
             "sector": "sector",
             "control_point": "control_point",
             "zone": "zone",
+            "landmark": "landmark",
             "active_group": "active_group",
             "reserve_group": "reserve_group",
+            "air_package_inventory": "air_inventory",
+            "air_package_preset": "air_preset",
             "deployment_restriction": "restriction",
         }
         return mapping[object_type]

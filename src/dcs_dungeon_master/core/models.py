@@ -44,6 +44,8 @@ class ScenarioDefinition:
     zones: tuple["ScenarioZone", ...] = ()
     deployment_restrictions: tuple["DeploymentRestrictionState", ...] = ()
     air_package_inventories: tuple["AirPackageInventoryState", ...] = ()
+    landmarks: tuple["ScenarioLandmarkState", ...] = ()
+    air_package_presets: tuple["AirPackagePresetState", ...] = ()
 
     @property
     def sector_ids(self) -> tuple[str, ...]:
@@ -90,6 +92,15 @@ class ScenarioZone:
     center_lat: float
     center_lng: float
     radius_nm: float
+    tags: tuple[str, ...] = ()
+
+
+@dataclass(slots=True, frozen=True)
+class ScenarioLandmarkState:
+    id: str
+    name: str
+    lat: float
+    lng: float
     tags: tuple[str, ...] = ()
 
 
@@ -195,6 +206,22 @@ class AirPackageState:
     current_sector_id: str | None = None
     last_updated_at: datetime | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True, frozen=True)
+class AirPackagePresetState:
+    id: str
+    coalition: Coalition
+    name: str
+    inventory_id: str
+    package_type: str
+    aircraft_count: int
+    description: str | None = None
+    route_legs: tuple[AirRouteLeg, ...] = ()
+    target_reference_type: str | None = None
+    target_reference_id: str | None = None
+    posture: str = "push"
+    roe: str = "tight"
 
 
 @dataclass(slots=True, frozen=True)

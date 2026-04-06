@@ -1189,6 +1189,9 @@ class ActionValidator:
                 raise _ValidationAbort(RejectionCode.DESTINATION_INVALID, f"Unknown zone '{reference_id}'.")
             return (zone.center_lat, zone.center_lng)
         if reference_type == "landmark":
+            scenario_landmark = next((item for item in self.scenario.landmarks if item.id == reference_id), None)
+            if scenario_landmark is not None:
+                return (float(scenario_landmark.lat), float(scenario_landmark.lng))
             landmark = next((item for item in (bundle.landmarks if bundle is not None else ()) if item.get("id") == reference_id), None)
             if landmark is None:
                 raise _ValidationAbort(RejectionCode.DESTINATION_INVALID, f"Unknown landmark '{reference_id}'.")

@@ -77,6 +77,7 @@ class ExecutionEngine:
         *,
         model_invocation_id: int | None,
         observation_id: int | None,
+        simulate_only: bool = False,
         now: datetime | None = None,
     ) -> ExecutionBatchResult:
         started_at = now or datetime.now(UTC)
@@ -138,7 +139,7 @@ class ExecutionEngine:
                         resulting_entities=plan.resulting_entities,
                     )
                 else:
-                    result = self._execute_plan(plan, started_at)
+                    result = self._execute_plan(plan, started_at, simulate_only=simulate_only)
                 results.append(result)
                 if result.status in {ExecutionStatus.SUCCEEDED, ExecutionStatus.PARTIALLY_SUCCEEDED, ExecutionStatus.NO_CHANGE}:
                     state_updates = self._effective_state_updates(plan, result)
@@ -178,7 +179,11 @@ class ExecutionEngine:
 
         completed_at = datetime.now(UTC)
         batch_status = self._classify_batch(results)
-        summary = tuple(f"{result.action_id}:{result.status.value}" for result in results) or ("no_accepted_actions",)
+        mode_summary = "simulated_execution" if simulate_only else None
+        summary = tuple(
+            item
+            for item in ((mode_summary,) if mode_summary else ()) + tuple(f"{result.action_id}:{result.status.value}" for result in results)
+        ) or ("no_accepted_actions",)
         batch = ExecutionBatchResult(
             id=batch_id,
             run_id=run_id,
@@ -852,7 +857,7 @@ class ExecutionEngine:
             summary=f"Group {group.id} moved to sector {sector_id}.",
         )
 
-    def _execute_plan(self, plan: ExecutionPlan, now: datetime) -> ExecutionResult:
+    def _execute_plan(self, plan: ExecutionPlan, now: datetime, *, simulate_only: bool = False) -> ExecutionResult:
         if plan.action_type == ActionType.HOLD_ACTION:
             return ExecutionResult(
                 action_id=plan.action_id,
@@ -872,6 +877,19 @@ class ExecutionEngine:
                 resource_delta=dict(plan.resource_delta),
                 standing_order_delta=tuple(order.id for order in plan.standing_orders),
                 resulting_entities=plan.resulting_entities,
+            )
+
+        if simulate_only:
+            return ExecutionResult(
+                action_id=plan.action_id,
+                action_type=plan.action_type,
+                status=ExecutionStatus.SUCCEEDED,
+                execution_summary=plan.summary or f"Simulated execution for action {plan.action_id}.",
+                command_count=len(plan.commands),
+                resource_delta=dict(plan.resource_delta),
+                standing_order_delta=tuple(order.id for order in plan.standing_orders),
+                resulting_entities=plan.resulting_entities,
+                applied_commands=tuple(plan.commands),
             )
 
         applied_commands: list[ExecutionCommand] = []

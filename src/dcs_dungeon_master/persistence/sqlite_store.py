@@ -949,6 +949,39 @@ class SQLiteStateStore:
             ),
         )
 
+    def record_operator_action_submission(
+        self,
+        run_id: str,
+        *,
+        coalition: Coalition,
+        decision_cycle: int,
+        submitted_at: datetime,
+        action_ids: tuple[str, ...],
+        validation_batch_id: int | None,
+        execution_batch_id: int | None,
+        source: str = "operator_ui",
+    ) -> None:
+        with self._connect() as connection:
+            self.append_event(
+                connection,
+                EventRecord(
+                    id=None,
+                    run_id=run_id,
+                    event_type="operator_action_submission",
+                    entity_type="operator_action_batch",
+                    entity_id=str(validation_batch_id or execution_batch_id or decision_cycle),
+                    occurred_at=submitted_at,
+                    payload={
+                        "source": source,
+                        "coalition": coalition.value,
+                        "decision_cycle": decision_cycle,
+                        "action_ids": action_ids,
+                        "validation_batch_id": validation_batch_id,
+                        "execution_batch_id": execution_batch_id,
+                    },
+                ),
+            )
+
     def get_latest_run_id(self) -> str:
         with self._connect() as connection:
             row = connection.execute(
