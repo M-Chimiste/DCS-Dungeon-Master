@@ -15,6 +15,8 @@ from dcs_dungeon_master.integration.types import GrpcStreamEnvelope
 from dcs_dungeon_master.model_adapter import build_model_registry
 from dcs_dungeon_master.persistence import SQLiteStateStore
 from dcs_dungeon_master.scenario_state.registry import get_scenario_definition
+from dcs_dungeon_master.setup_wizard import SetupWizardService
+from dcs_dungeon_master.core.models import SetupCheckResult, SetupConfigWriteResult, SetupRecommendation, SetupWizardStatus
 from dcs_dungeon_master.world_state import WorldStateRepository, WorldStateUpdater
 
 
@@ -155,6 +157,66 @@ def test_init_state_and_state_summary_cli_smoke(tmp_path: Path, capsys) -> None:
     assert summary_exit_code == 0
     assert summary_payload["run_id"] == run_id
     assert summary_payload["active_group_count"] == 10
+
+
+def test_setup_cli_and_run_continuation_commands(tmp_path: Path, capsys, monkeypatch) -> None:
+    fake_status = SetupWizardStatus(
+        config_path=str(tmp_path / "config.toml"),
+        saved_games_path=SetupCheckResult("saved_games_path", "ready", True, "Detected path.", "C:/Saved Games/DCS.openbeta"),
+        autoexec_status=SetupCheckResult("autoexec_status", "ready", True, "Configured."),
+        olympus_status=SetupCheckResult("olympus_status", "ready", True, "ok", "http://127.0.0.1:4512"),
+        grpc_status=SetupCheckResult("grpc_status", "ready", True, "ok", "127.0.0.1:50051"),
+        config_status=SetupCheckResult("config_status", "ready", True, "loaded"),
+        overall_status="ready",
+        recommended_actions=(SetupRecommendation("environment_ready", "Environment checks passed."),),
+    )
+    fake_write = SetupConfigWriteResult(
+        output_path=str(tmp_path / "local.toml"),
+        written=True,
+        changed=True,
+        overwritten=False,
+        detail="Wrote generated local config.",
+        saved_games_path="C:/Saved Games/DCS.openbeta",
+    )
+    monkeypatch.setattr(SetupWizardService, "probe", lambda self, **kwargs: fake_status)
+    monkeypatch.setattr(SetupWizardService, "write_local_config", lambda self, **kwargs: fake_write)
+
+    config_path = _write_temp_config(tmp_path)
+    setup_exit = main(["setup-check", "--config", str(config_path)])
+    setup_payload = json.loads(capsys.readouterr().out)
+    write_exit = main(["setup-write-config", "--config", str(config_path), "--output", str(tmp_path / "local.toml")])
+    write_payload = json.loads(capsys.readouterr().out)
+
+    scenario = get_scenario_definition("phase1_baseline_persian_gulf", "scenarios/index.toml")
+    config = load_config(config_path)
+    store = SQLiteStateStore(config.persistence.db_path)
+    first_run_id = store.create_run_from_scenario(scenario)
+    second_run_id = store.create_run_from_scenario(scenario)
+    store.update_run_status(first_run_id, RunLifecycleStatus.PAUSED, changed_at=datetime.now(UTC))
+    store.update_run_status(second_run_id, RunLifecycleStatus.STOPPED, changed_at=datetime.now(UTC), terminal_reason="done")
+
+    list_exit = main(["run-list", "--config", str(config_path)])
+    list_payload = json.loads(capsys.readouterr().out)
+    open_latest_exit = main(["run-open-latest", "--config", str(config_path)])
+    open_latest_payload = json.loads(capsys.readouterr().out)
+    continue_exit = main(["run-continue", "--config", str(config_path), "--run-id", first_run_id])
+    continue_payload = json.loads(capsys.readouterr().out)
+    terminal_exit = main(["run-continue", "--config", str(config_path), "--run-id", second_run_id])
+    terminal_payload = json.loads(capsys.readouterr().out)
+
+    assert setup_exit == 0
+    assert setup_payload["overall_status"] == "ready"
+    assert write_exit == 0
+    assert write_payload["written"] is True
+    assert list_exit == 0
+    assert any(item["run_id"] == first_run_id for item in list_payload["resumable_runs"])
+    assert all(item["run_id"] != second_run_id for item in list_payload["resumable_runs"])
+    assert open_latest_exit == 0
+    assert open_latest_payload["run"]["run_id"] == second_run_id
+    assert continue_exit == 0
+    assert continue_payload["run"]["status"] == "running"
+    assert terminal_exit == 1
+    assert "cannot continue" in terminal_payload["error"]
 
 
 def test_operator_control_cli_and_replay_export(tmp_path: Path, capsys) -> None:
@@ -562,7 +624,6 @@ def test_model_backend_and_decision_cycle_cli_smoke(tmp_path: Path, capsys, monk
     scenario = get_scenario_definition("phase1_baseline_persian_gulf", "scenarios/index.toml")
     store = SQLiteStateStore(db_path)
     run_id = store.create_run_from_scenario(scenario)
-    config = load_config(config_path)
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path.endswith("/models"):

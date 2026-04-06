@@ -48,6 +48,7 @@ const DEFAULT_ADHOC = {
 
 export function OpsPage() {
   const [runs, setRuns] = useState<any[]>([]);
+  const [resumableRuns, setResumableRuns] = useState<any[]>([]);
   const [catalog, setCatalog] = useState<CatalogEntry[]>([]);
   const [scenarios, setScenarios] = useState<any[]>([]);
   const [selectedRunId, setSelectedRunId] = useState<string>("");
@@ -71,19 +72,25 @@ export function OpsPage() {
   const [bluePrimaryAdhoc, setBluePrimaryAdhoc] = useState(DEFAULT_ADHOC);
 
   const loadRuns = async () => {
-    const payload = await api<{ runs: any[] }>("/api/runs");
-    setRuns(payload.runs);
-    setSelectedRunId((current) => current || payload.runs[0]?.run_id || "");
+    const [runsPayload, resumablePayload] = await Promise.all([
+      api<{ runs: any[] }>("/api/runs"),
+      api<{ runs: any[] }>("/api/runs/resumable"),
+    ]);
+    setRuns(runsPayload.runs);
+    setResumableRuns(resumablePayload.runs);
+    setSelectedRunId((current) => current || runsPayload.runs[0]?.run_id || "");
   };
 
   useEffect(() => {
     Promise.all([
       api<{ runs: any[] }>("/api/runs"),
+      api<{ runs: any[] }>("/api/runs/resumable"),
       api<{ catalog: CatalogEntry[] }>("/api/model-catalog"),
       api<{ scenarios: any[] }>("/api/scenarios"),
     ])
-      .then(([runsPayload, catalogPayload, scenariosPayload]) => {
+      .then(([runsPayload, resumablePayload, catalogPayload, scenariosPayload]) => {
         setRuns(runsPayload.runs);
+        setResumableRuns(resumablePayload.runs);
         setCatalog(catalogPayload.catalog);
         setScenarios(scenariosPayload.scenarios);
         setSelectedRunId(runsPayload.runs[0]?.run_id ?? "");
@@ -213,9 +220,63 @@ export function OpsPage() {
     }
   };
 
+  const openLatestRun = async () => {
+    setStatus("Opening latest run...");
+    try {
+      const payload = await api<any>("/api/runs/latest");
+      setSelectedRunId(payload.run.run.run_id);
+      setStatus(`Opened latest run ${payload.run.run.run_id}.`);
+    } catch (error) {
+      setStatus(String(error));
+    }
+  };
+
+  const continueSelectedRun = async () => {
+    if (!selectedRunId) return;
+    setStatus("Continuing selected run...");
+    try {
+      const payload = await api<any>(`/api/runs/${selectedRunId}/continue`, { method: "POST" });
+      setSelectedRunId(payload.run.run.run_id);
+      await loadRuns();
+      setStatus(`Run ${payload.run.run.run_id} is ready to continue.`);
+    } catch (error) {
+      setStatus(String(error));
+    }
+  };
+
   return (
     <div className="grid ops-grid">
       <aside className="rail">
+        <div className="panel">
+          <h2>Continue Existing Run</h2>
+          <p className="muted">Resume a persisted harness-managed run before creating a new one.</p>
+          <div className="button-row">
+            <button onClick={openLatestRun}>Open Latest</button>
+            <button onClick={continueSelectedRun} disabled={!selectedRunId}>
+              Continue Selected
+            </button>
+          </div>
+          <div className="stack">
+            {resumableRuns.length ? (
+              resumableRuns.map((run) => (
+                <button
+                  key={`resumable-${run.run_id}`}
+                  className={run.run_id === selectedRunId ? "list-card active" : "list-card"}
+                  onClick={() => setSelectedRunId(run.run_id)}
+                >
+                  <strong>{run.scenario_name}</strong>
+                  <span>
+                    {run.mode} / {run.status}
+                  </span>
+                  <span>Cycle {run.latest_decision_cycle}</span>
+                </button>
+              ))
+            ) : (
+              <p className="muted">No resumable runs yet.</p>
+            )}
+          </div>
+        </div>
+
         <div className="panel">
           <h2>Run Setup</h2>
           <p className="muted">{status}</p>

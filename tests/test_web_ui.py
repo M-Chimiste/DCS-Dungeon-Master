@@ -5,10 +5,11 @@ from pathlib import Path
 import shutil
 
 from dcs_dungeon_master.core.config import load_config
+from dcs_dungeon_master.core.enums import RunLifecycleStatus
 from dcs_dungeon_master.integration.types import GrpcStreamEnvelope
 from dcs_dungeon_master.observation import ObservationBuilder
 from dcs_dungeon_master.persistence import SQLiteStateStore
-from dcs_dungeon_master.core.models import ScenarioDraftPatch
+from dcs_dungeon_master.core.models import ScenarioDraftPatch, SetupCheckResult, SetupConfigWriteResult, SetupRecommendation, SetupWizardStatus
 from dcs_dungeon_master.scenario_state.registry import get_scenario_definition
 from dcs_dungeon_master.sensor_fusion import SensorFusionService
 from dcs_dungeon_master.web_ui import PydcsReferenceService, ScenarioDraftService, WebUiService
@@ -339,3 +340,57 @@ def test_web_ui_routing_patch_requires_created_run_and_rejects_bad_adhoc_payload
     assert start_status == 200
     assert locked_status == 400
     assert "only be updated while the run is still created" in locked_payload["error"]
+
+
+def test_web_ui_setup_routes_return_structured_status_and_write_result(tmp_path: Path) -> None:
+    config_path = _write_temp_config(tmp_path)
+    service = WebUiService.from_config_path(config_path)
+    fake_status = SetupWizardStatus(
+        config_path=str(config_path),
+        saved_games_path=SetupCheckResult("saved_games_path", "ready", True, "Detected path.", "C:/Saved Games/DCS.openbeta"),
+        autoexec_status=SetupCheckResult("autoexec_status", "ready", True, "Configured."),
+        olympus_status=SetupCheckResult("olympus_status", "ready", True, "ok", "http://127.0.0.1:4512"),
+        grpc_status=SetupCheckResult("grpc_status", "ready", True, "ok", "127.0.0.1:50051"),
+        config_status=SetupCheckResult("config_status", "ready", True, "loaded", str(config_path)),
+        overall_status="ready",
+        recommended_actions=(SetupRecommendation("environment_ready", "Environment checks passed."),),
+    )
+    fake_write = SetupConfigWriteResult(
+        output_path=str(tmp_path / "local.toml"),
+        written=True,
+        changed=True,
+        overwritten=False,
+        detail="Wrote generated local config.",
+        saved_games_path="C:/Saved Games/DCS.openbeta",
+    )
+    service.setup_wizard.probe = lambda **kwargs: fake_status
+    service.setup_wizard.write_local_config = lambda **kwargs: fake_write
+
+    status_code, status_payload = service.dispatch("GET", "/api/setup/status")
+    probe_code, probe_payload = service.dispatch("POST", "/api/setup/probe", {"saved_games_path": "C:/Saved Games/DCS.openbeta"})
+    write_code, write_payload = service.dispatch("POST", "/api/setup/write-config", {"output": str(tmp_path / "local.toml")})
+
+    assert status_code == 200
+    assert probe_code == 200
+    assert write_code == 200
+    assert status_payload["setup"]["overall_status"] == "ready"
+    assert probe_payload["setup"]["saved_games_path"]["detected_value"] == "C:/Saved Games/DCS.openbeta"
+    assert write_payload["write_result"]["written"] is True
+
+
+def test_web_ui_resumable_latest_and_continue_routes(tmp_path: Path) -> None:
+    config_path = _write_temp_config(tmp_path)
+    store, run_id = _seed_run_with_observations(config_path)
+    store.update_run_status(run_id, RunLifecycleStatus.PAUSED, changed_at=datetime(2026, 4, 5, 12, 5, tzinfo=UTC))
+    service = WebUiService.from_config_path(config_path)
+
+    resumable_status, resumable_payload = service.dispatch("GET", "/api/runs/resumable")
+    latest_status, latest_payload = service.dispatch("GET", "/api/runs/latest")
+    continue_status, continue_payload = service.dispatch("POST", f"/api/runs/{run_id}/continue", {})
+
+    assert resumable_status == 200
+    assert latest_status == 200
+    assert continue_status == 200
+    assert resumable_payload["runs"][0]["run_id"] == run_id
+    assert latest_payload["run"]["run"]["run_id"] == run_id
+    assert continue_payload["run"]["run"]["status"] == "running"

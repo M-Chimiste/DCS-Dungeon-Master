@@ -141,6 +141,11 @@ class MultimodalConfig:
 
 
 @dataclass(slots=True, frozen=True)
+class SetupConfig:
+    saved_games_path: str | None = None
+
+
+@dataclass(slots=True, frozen=True)
 class EvaluationMatrixCaseConfig:
     id: str
     description: str
@@ -181,6 +186,7 @@ class AppConfig:
     dry_run: DryRunConfig = field(default_factory=lambda: DryRunConfig(enabled=True))
     fog_of_war: FogOfWarConfig = field(default_factory=FogOfWarConfig)
     multimodal: MultimodalConfig = field(default_factory=MultimodalConfig)
+    setup: SetupConfig = field(default_factory=SetupConfig)
     evaluation: EvaluationProfileConfig = field(default_factory=EvaluationProfileConfig)
 
     def to_dict(self) -> dict[str, Any]:
@@ -310,6 +316,11 @@ def load_config(path: str | Path) -> AppConfig:
         multimodal = {}
     if not isinstance(multimodal, dict):
         raise ConfigError("Config section 'multimodal' must be a table when provided.")
+    setup = raw.get("setup", {})
+    if setup is None:
+        setup = {}
+    if not isinstance(setup, dict):
+        raise ConfigError("Config section 'setup' must be a table when provided.")
     evaluation_matrix_raw = evaluation.get("matrix_cases", [])
     if not isinstance(evaluation_matrix_raw, list):
         raise ConfigError("Config field 'evaluation.matrix_cases' must be an array of tables when provided.")
@@ -608,6 +619,9 @@ def load_config(path: str | Path) -> AppConfig:
         multimodal=MultimodalConfig(
             enabled=bool(multimodal.get("enabled", False)),
             output_dir=_optional_str(multimodal, "output_dir") or ".cache/dcs-dungeon-master/attachments",
+        ),
+        setup=SetupConfig(
+            saved_games_path=_optional_str(setup, "saved_games_path"),
         ),
         evaluation=EvaluationProfileConfig(
             profile_name=_optional_str(evaluation, "profile_name") or "phase1_baseline",

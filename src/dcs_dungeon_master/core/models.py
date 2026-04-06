@@ -10,7 +10,6 @@ from dcs_dungeon_master.core.enums import (
     ActionType,
     Coalition,
     ConfidenceBand,
-    DestinationType,
     EvaluationRating,
     ExecutionLifecycleState,
     ExecutionStatus,
@@ -24,7 +23,7 @@ from dcs_dungeon_master.core.enums import (
     RejectionCode,
     EvaluationReviewPolicy,
     RunLifecycleStatus,
-    SectorPriority,
+    StartupIntent,
     ValidationEvidenceBasis,
     ValidationStatus,
 )
@@ -871,6 +870,73 @@ class RunControlState:
     failed_at: datetime | None = None
     terminal_reason: str | None = None
     evaluation_metadata: dict[str, Any] | None = None
+
+
+@dataclass(slots=True, frozen=True)
+class SetupCheckResult:
+    step: str
+    status: str
+    healthy: bool
+    detail: str
+    detected_value: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True, frozen=True)
+class SetupRecommendation:
+    code: str
+    message: str
+    action: str | None = None
+
+
+@dataclass(slots=True, frozen=True)
+class SetupWizardStatus:
+    config_path: str
+    saved_games_path: SetupCheckResult
+    autoexec_status: SetupCheckResult
+    olympus_status: SetupCheckResult
+    grpc_status: SetupCheckResult
+    config_status: SetupCheckResult
+    overall_status: str
+    recommended_actions: tuple[SetupRecommendation, ...] = ()
+
+
+@dataclass(slots=True, frozen=True)
+class SetupConfigWriteResult:
+    output_path: str
+    written: bool
+    changed: bool
+    overwritten: bool
+    detail: str
+    saved_games_path: str | None = None
+
+
+@dataclass(slots=True, frozen=True)
+class ResumableRunSummary:
+    run_id: str
+    scenario_id: str
+    scenario_name: str
+    theater: str
+    mode: str
+    status: RunLifecycleStatus
+    created_at: datetime
+    last_updated_at: datetime
+    latest_decision_cycle: int
+    resumable: bool
+    red_backend_name: str | None = None
+    blue_backend_name: str | None = None
+    terminal_reason: str | None = None
+    last_error_summary: tuple[str, ...] = ()
+
+
+@dataclass(slots=True, frozen=True)
+class RunContinuationView:
+    run: RunControlState
+    startup_intent: StartupIntent
+    latest_decision_cycle: int
+    last_updated_at: datetime
+    resumable: bool
+    last_error_summary: tuple[str, ...] = ()
 
 
 @dataclass(slots=True, frozen=True)

@@ -94,6 +94,12 @@ class RunLifecycleStatus(StrEnum):
     FAILED = "failed"
 
 
+class StartupIntent(StrEnum):
+    NEW = "new"
+    OPEN_EXISTING = "open-existing"
+    OPEN_LATEST = "open-latest"
+
+
 class RejectionCode(StrEnum):
     UNKNOWN_ACTION_TYPE = "unknown_action_type"
     MISSING_REQUIRED_FIELD = "missing_required_field"

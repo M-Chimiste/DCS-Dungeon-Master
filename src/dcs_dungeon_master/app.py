@@ -15,12 +15,15 @@ from dcs_dungeon_master.core.versions import ACTION_SCHEMA_VERSION, APP_VERSION,
 from dcs_dungeon_master.evaluation import EvaluationService, build_evaluation_metadata
 from dcs_dungeon_master.execution import ExecutionEngine, LiveCommandLoopRunner
 from dcs_dungeon_master.integration import IntegrationIngestCoordinator, build_integration_services
+from dcs_dungeon_master.live_mission_attach import LiveMissionAttachService
 from dcs_dungeon_master.model_adapter import DryDecisionLoopRunner, build_model_registry
 from dcs_dungeon_master.observation import ObservationBuilder
 from dcs_dungeon_master.operator_control import OperatorControlService
 from dcs_dungeon_master.persistence import SQLiteStateStore
+from dcs_dungeon_master.run_continuation import RunContinuationService
 from dcs_dungeon_master.scenario_state.registry import get_scenario_definition
 from dcs_dungeon_master.sensor_fusion import SensorFusionService
+from dcs_dungeon_master.setup_wizard import SetupWizardService
 from dcs_dungeon_master.world_state import KnowledgeDebugView, WorldStateRepository, WorldStateUpdater
 
 
@@ -83,7 +86,10 @@ def bootstrap_application(config_path: str | Path = DEFAULT_CONFIG_PATH) -> Appl
     model_registry = build_model_registry(config)
     debug_view = KnowledgeDebugView(store, sensor_fusion)
     operator_control = OperatorControlService(store, sensor_fusion=sensor_fusion, world_repository=world_repository)
+    run_continuation = RunContinuationService(store, operator_control)
     evaluation = EvaluationService(store, scenario)
+    setup_wizard = SetupWizardService(config_path=config_path)
+    live_attach = LiveMissionAttachService()
 
     integrations = build_integration_services(config.dcs)
     ingest_coordinator = IntegrationIngestCoordinator(integrations, world_updater)
@@ -111,6 +117,9 @@ def bootstrap_application(config_path: str | Path = DEFAULT_CONFIG_PATH) -> Appl
         "live_command_loop": live_loop.status,
         "persistence": "sqlite-ready",
         "operator_control": operator_control.status,
+        "run_continuation": run_continuation.status,
+        "setup_wizard": setup_wizard.status,
+        "live_mission_attach": live_attach.status,
         "evaluation": evaluation.status,
         "web_ui_api": "web-ui-api-ready",
         "knowledge_debug": "debug-ready" if debug_view else "debug-unavailable",

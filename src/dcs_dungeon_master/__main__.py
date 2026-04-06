@@ -24,8 +24,10 @@ from dcs_dungeon_master.model_adapter import DryDecisionLoopRunner, build_model_
 from dcs_dungeon_master.observation import ObservationBuilder
 from dcs_dungeon_master.operator_control import OperatorControlService
 from dcs_dungeon_master.persistence import SQLiteStateStore
+from dcs_dungeon_master.run_continuation import RunContinuationService
 from dcs_dungeon_master.scenario_state.registry import get_scenario_definition
 from dcs_dungeon_master.sensor_fusion import SensorFusionService
+from dcs_dungeon_master.setup_wizard import SetupWizardService
 from dcs_dungeon_master.web_ui import WebUiService, serve_web_ui
 from dcs_dungeon_master.world_state import KnowledgeDebugView, WorldStateRepository, WorldStateUpdater
 
@@ -159,6 +161,37 @@ def build_parser() -> argparse.ArgumentParser:
     state_summary = subparsers.add_parser("state-summary", help="Print SQLite-backed current-state summary.")
     add_config_argument(state_summary)
     state_summary.add_argument("--run-id", type=str, default=None, help="Optional run id. Defaults to the latest run.")
+
+    setup_wizard = subparsers.add_parser(
+        "setup-wizard",
+        help="Probe the local DCS/Olympus/DCS-gRPC environment and summarize setup readiness.",
+    )
+    add_config_argument(setup_wizard)
+    setup_wizard.add_argument("--saved-games", type=str, default=None)
+    setup_wizard.add_argument("--olympus-url", type=str, default=None)
+    setup_wizard.add_argument("--grpc-host", type=str, default=None)
+    setup_wizard.add_argument("--grpc-port", type=int, default=None)
+
+    setup_check = subparsers.add_parser(
+        "setup-check",
+        help="Run non-writing environment checks for DCS Saved Games, Olympus, DCS-gRPC, and local config.",
+    )
+    add_config_argument(setup_check)
+    setup_check.add_argument("--saved-games", type=str, default=None)
+    setup_check.add_argument("--olympus-url", type=str, default=None)
+    setup_check.add_argument("--grpc-host", type=str, default=None)
+    setup_check.add_argument("--grpc-port", type=int, default=None)
+
+    setup_write_config = subparsers.add_parser(
+        "setup-write-config",
+        help="Write a generated local config file using detected or provided setup values.",
+    )
+    add_config_argument(setup_write_config)
+    setup_write_config.add_argument("--saved-games", type=str, default=None)
+    setup_write_config.add_argument("--olympus-url", type=str, default=None)
+    setup_write_config.add_argument("--grpc-host", type=str, default=None)
+    setup_write_config.add_argument("--grpc-port", type=int, default=None)
+    setup_write_config.add_argument("--output", type=Path, default=Path("config/local.toml"))
 
     check_integration = subparsers.add_parser("check-integration", help="Check Olympus and DCS-gRPC health.")
     add_config_argument(check_integration)
@@ -338,6 +371,23 @@ def build_parser() -> argparse.ArgumentParser:
     run_stop.add_argument("--run-id", type=str, default=None, help="Optional run id. Defaults to the latest run.")
     run_stop.add_argument("--reason", type=str, default="stopped_by_operator")
 
+    run_list = subparsers.add_parser("run-list", help="List persisted runs with resumable-state hints.")
+    add_config_argument(run_list)
+
+    run_open = subparsers.add_parser("run-open", help="Open one persisted run with latest-cycle context.")
+    add_config_argument(run_open)
+    run_open.add_argument("--run-id", type=str, required=True)
+
+    run_open_latest = subparsers.add_parser("run-open-latest", help="Open the latest persisted run.")
+    add_config_argument(run_open_latest)
+
+    run_continue = subparsers.add_parser(
+        "run-continue",
+        help="Continue a created/paused/running persisted run without creating a new one.",
+    )
+    add_config_argument(run_continue)
+    run_continue.add_argument("--run-id", type=str, required=True)
+
     run_status = subparsers.add_parser("run-status", help="Show run lifecycle status and metadata.")
     add_config_argument(run_status)
     run_status.add_argument("--run-id", type=str, default=None, help="Optional run id. Defaults to the latest run.")
@@ -426,7 +476,7 @@ def build_parser() -> argparse.ArgumentParser:
     eval_closeout_status.add_argument("--run-id", type=str, default=None, help="Optional run id. Defaults to the latest run.")
     eval_closeout_status.add_argument("--profile", type=str, default=None)
 
-    validate_grpc_contracts = subparsers.add_parser(
+    subparsers.add_parser(
         "validate-grpc-contracts",
         help="Generate vendored gRPC stubs into a temporary location to validate the proto contracts.",
     )
@@ -502,6 +552,33 @@ def main(argv: Sequence[str] | None = None) -> int:
         config = load_config(args.config)
         store = SQLiteStateStore(config.persistence.db_path, enable_wal=config.persistence.enable_wal)
         print(json.dumps(store.get_run_summary(args.run_id), indent=2, sort_keys=True))
+        return 0
+
+    if args.command in {"setup-wizard", "setup-check", "setup-write-config"}:
+        wizard = SetupWizardService(config_path=args.config)
+        if args.command == "setup-write-config":
+            payload = wizard.write_local_config(
+                output_path=args.output,
+                saved_games_path=args.saved_games,
+                olympus_url=args.olympus_url,
+                grpc_host=args.grpc_host,
+                grpc_port=args.grpc_port,
+            )
+        else:
+            setup = wizard.probe(
+                saved_games_path=args.saved_games,
+                olympus_url=args.olympus_url,
+                grpc_host=args.grpc_host,
+                grpc_port=args.grpc_port,
+            )
+            if args.command == "setup-wizard":
+                payload = {
+                    "summary": f"overall_status={setup.overall_status}; recommendations={len(setup.recommended_actions)}",
+                    "setup": setup,
+                }
+            else:
+                payload = setup
+        _print_payload(payload)
         return 0
 
     if args.command == "check-integration":
@@ -736,35 +813,66 @@ def main(argv: Sequence[str] | None = None) -> int:
         _print_payload(payload)
         return 0
 
-    if args.command in {"run-start", "run-pause", "run-resume", "run-stop", "run-status", "run-summary", "run-timeline", "run-inspect", "run-compare", "replay-export"}:
+    if args.command in {
+        "run-start",
+        "run-pause",
+        "run-resume",
+        "run-stop",
+        "run-list",
+        "run-open",
+        "run-open-latest",
+        "run-continue",
+        "run-status",
+        "run-summary",
+        "run-timeline",
+        "run-inspect",
+        "run-compare",
+        "replay-export",
+    }:
         config = load_config(args.config)
         scenario = get_scenario_definition(config.scenario.id, config.scenario.registry_path)
         store = SQLiteStateStore(config.persistence.db_path, enable_wal=config.persistence.enable_wal)
         world_repository = WorldStateRepository(store)
         sensor_fusion = SensorFusionService(store, scenario, config.fog_of_war)
         operator = OperatorControlService(store, sensor_fusion=sensor_fusion, world_repository=world_repository)
-        resolved_run_id = getattr(args, "run_id", None) or store.get_latest_run_id()
+        continuation = RunContinuationService(store, operator)
+        try:
+            resolved_run_id = None if args.command in {"run-list", "run-open-latest"} else (getattr(args, "run_id", None) or store.get_latest_run_id())
 
-        if args.command == "run-start":
-            payload = operator.start_run(resolved_run_id)
-        elif args.command == "run-pause":
-            payload = operator.pause_run(resolved_run_id)
-        elif args.command == "run-resume":
-            payload = operator.resume_run(resolved_run_id)
-        elif args.command == "run-stop":
-            payload = operator.stop_run(resolved_run_id, reason=args.reason)
-        elif args.command == "run-status":
-            payload = operator.get_status(resolved_run_id)
-        elif args.command == "run-summary":
-            payload = operator.summarize_run(resolved_run_id)
-        elif args.command == "run-timeline":
-            payload = operator.list_timeline(resolved_run_id)
-        elif args.command == "run-inspect":
-            payload = operator.inspect_coalition(resolved_run_id, Coalition(args.coalition))
-        elif args.command == "run-compare":
-            payload = operator.compare_runs(args.left_run_id, args.right_run_id)
-        else:
-            payload = operator.export_replay_bundle(resolved_run_id, args.output)
+            if args.command == "run-start":
+                payload = operator.start_run(resolved_run_id)
+            elif args.command == "run-pause":
+                payload = operator.pause_run(resolved_run_id)
+            elif args.command == "run-resume":
+                payload = operator.resume_run(resolved_run_id)
+            elif args.command == "run-stop":
+                payload = operator.stop_run(resolved_run_id, reason=args.reason)
+            elif args.command == "run-list":
+                payload = {
+                    "runs": continuation.list_runs(),
+                    "resumable_runs": continuation.list_resumable_runs(),
+                }
+            elif args.command == "run-open":
+                payload = continuation.open_run(args.run_id)
+            elif args.command == "run-open-latest":
+                payload = continuation.get_latest_run()
+            elif args.command == "run-continue":
+                payload = continuation.continue_run(args.run_id)
+            elif args.command == "run-status":
+                payload = operator.get_status(resolved_run_id)
+            elif args.command == "run-summary":
+                payload = operator.summarize_run(resolved_run_id)
+            elif args.command == "run-timeline":
+                payload = operator.list_timeline(resolved_run_id)
+            elif args.command == "run-inspect":
+                payload = operator.inspect_coalition(resolved_run_id, Coalition(args.coalition))
+            elif args.command == "run-compare":
+                payload = operator.compare_runs(args.left_run_id, args.right_run_id)
+            else:
+                payload = operator.export_replay_bundle(resolved_run_id, args.output)
+        except Exception as exc:  # noqa: BLE001
+            _print_payload({"error": str(exc)})
+            return 1
 
         _print_payload(payload)
         return 0

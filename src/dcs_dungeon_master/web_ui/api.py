@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from dcs_dungeon_master.app import DEFAULT_CONFIG_PATH
-from dcs_dungeon_master.core.config import AppConfig, ModelBackendConfig, load_config
+from dcs_dungeon_master.core.config import AppConfig, load_config
 from dcs_dungeon_master.core.enums import Coalition, ModelHostingMode, RunLifecycleStatus
 from dcs_dungeon_master.core.exceptions import PersistenceError, ScenarioNotFoundError
 from dcs_dungeon_master.core.models import (
@@ -30,7 +30,9 @@ from dcs_dungeon_master.evaluation import build_evaluation_metadata
 from dcs_dungeon_master.model_adapter import build_model_registry
 from dcs_dungeon_master.operator_control import OperatorControlService
 from dcs_dungeon_master.persistence import SQLiteStateStore
+from dcs_dungeon_master.run_continuation import RunContinuationService
 from dcs_dungeon_master.scenario_state.registry import get_scenario_definition, list_scenarios, scenario_definition_to_dict
+from dcs_dungeon_master.setup_wizard import SetupWizardService
 from dcs_dungeon_master.web_ui.pydcs_reference import PydcsReferenceService
 from dcs_dungeon_master.web_ui.scenario_drafts import ScenarioDraftService
 
@@ -56,6 +58,8 @@ class WebUiService:
     config: AppConfig
     store: SQLiteStateStore
     operator: OperatorControlService
+    run_continuation: RunContinuationService
+    setup_wizard: SetupWizardService
     draft_service: ScenarioDraftService
     registry_path: Path
 
@@ -67,7 +71,17 @@ class WebUiService:
         reference_service = PydcsReferenceService()
         draft_service = ScenarioDraftService(store, index_path=config.scenario.registry_path, reference_service=reference_service)
         operator = OperatorControlService(store)
-        return cls(config=config, store=store, operator=operator, draft_service=draft_service, registry_path=Path(config.scenario.registry_path))
+        continuation = RunContinuationService(store, operator)
+        setup_wizard = SetupWizardService(config_path=config_path)
+        return cls(
+            config=config,
+            store=store,
+            operator=operator,
+            run_continuation=continuation,
+            setup_wizard=setup_wizard,
+            draft_service=draft_service,
+            registry_path=Path(config.scenario.registry_path),
+        )
 
     @property
     def status(self) -> str:
@@ -165,6 +179,35 @@ class WebUiService:
         scenario = get_scenario_definition(entries[0].id, self.registry_path)
         return {"reference": _json_ready(self.draft_service.reference_service.reference_for_scenario(scenario))}
 
+    def get_setup_status(self) -> dict[str, Any]:
+        return {"setup": _json_ready(self.setup_wizard.probe())}
+
+    def probe_setup(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "setup": _json_ready(
+                self.setup_wizard.probe(
+                    saved_games_path=payload.get("saved_games_path"),
+                    olympus_url=payload.get("olympus_url"),
+                    grpc_host=payload.get("grpc_host"),
+                    grpc_port=int(payload["grpc_port"]) if payload.get("grpc_port") not in {None, ""} else None,
+                )
+            )
+        }
+
+    def write_setup_config(self, payload: dict[str, Any]) -> dict[str, Any]:
+        output = payload.get("output") or "config/local.toml"
+        return {
+            "write_result": _json_ready(
+                self.setup_wizard.write_local_config(
+                    output_path=output,
+                    saved_games_path=payload.get("saved_games_path"),
+                    olympus_url=payload.get("olympus_url"),
+                    grpc_host=payload.get("grpc_host"),
+                    grpc_port=int(payload["grpc_port"]) if payload.get("grpc_port") not in {None, ""} else None,
+                )
+            )
+        }
+
     def list_runs(self) -> dict[str, Any]:
         runs = []
         for state in self.store.list_run_control_states():
@@ -189,6 +232,18 @@ class WebUiService:
                 }
             )
         return {"runs": _json_ready(runs)}
+
+    def list_resumable_runs(self) -> dict[str, Any]:
+        return {"runs": _json_ready(self.run_continuation.list_resumable_runs())}
+
+    def get_latest_run(self) -> dict[str, Any]:
+        return {"run": _json_ready(self.run_continuation.get_latest_run())}
+
+    def open_run(self, run_id: str) -> dict[str, Any]:
+        return {"run": _json_ready(self.run_continuation.open_run(run_id))}
+
+    def continue_run(self, run_id: str) -> dict[str, Any]:
+        return {"run": _json_ready(self.run_continuation.continue_run(run_id))}
 
     def list_model_catalog(self) -> dict[str, Any]:
         registry = build_model_registry(self.config)
@@ -460,6 +515,12 @@ class WebUiService:
         if not segments or segments[0] != "api":
             return (404, {"error": "Unknown route."})
         try:
+            if method == "GET" and segments == ["api", "setup", "status"]:
+                return (200, self.get_setup_status())
+            if method == "POST" and segments == ["api", "setup", "probe"]:
+                return (200, self.probe_setup(body))
+            if method == "POST" and segments == ["api", "setup", "write-config"]:
+                return (200, self.write_setup_config(body))
             if method == "GET" and segments == ["api", "scenarios", "drafts"]:
                 return (200, self.list_scenario_drafts())
             if method == "GET" and segments == ["api", "scenarios"]:
@@ -490,6 +551,10 @@ class WebUiService:
                 return (200, self.get_theater_reference(segments[2]))
             if method == "GET" and segments == ["api", "runs"]:
                 return (200, self.list_runs())
+            if method == "GET" and segments == ["api", "runs", "resumable"]:
+                return (200, self.list_resumable_runs())
+            if method == "GET" and segments == ["api", "runs", "latest"]:
+                return (200, self.get_latest_run())
             if method == "POST" and segments == ["api", "runs"]:
                 return (200, self.create_run(body))
             if method == "GET" and segments == ["api", "model-catalog"]:
@@ -497,6 +562,10 @@ class WebUiService:
             if len(segments) >= 4 and segments[1] == "runs":
                 run_id = segments[2]
                 tail = segments[3:]
+                if method == "GET" and tail == ["open"]:
+                    return (200, self.open_run(run_id))
+                if method == "POST" and tail == ["continue"]:
+                    return (200, self.continue_run(run_id))
                 if method == "GET" and tail == ["status"]:
                     return (200, self.get_run_status(run_id))
                 if method == "GET" and tail == ["routing"]:

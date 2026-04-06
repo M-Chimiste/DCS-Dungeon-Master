@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
 import { OpsPage } from "./routes/OpsPage";
+import { SetupPage } from "./routes/SetupPage";
 import { StudioPage } from "./routes/StudioPage";
 
-type RouteName = "studio" | "ops";
+type RouteName = "setup" | "studio" | "ops";
 
 function routeFromPath(pathname: string): RouteName {
+  if (pathname.startsWith("/setup")) return "setup";
   return pathname.startsWith("/ops") ? "ops" : "studio";
 }
 
@@ -18,7 +20,7 @@ export function App() {
   }, []);
 
   const navigate = (next: RouteName) => {
-    const path = next === "ops" ? "/ops" : "/studio";
+    const path = next === "ops" ? "/ops" : next === "setup" ? "/setup" : "/studio";
     window.history.pushState({}, "", path);
     setRoute(next);
   };
@@ -31,6 +33,9 @@ export function App() {
           <h1>DCS Dungeon Master</h1>
         </div>
         <nav className="nav">
+          <button className={route === "setup" ? "tab active" : "tab"} onClick={() => navigate("setup")}>
+            Setup
+          </button>
           <button className={route === "studio" ? "tab active" : "tab"} onClick={() => navigate("studio")}>
             Campaign Studio
           </button>
@@ -39,7 +44,7 @@ export function App() {
           </button>
         </nav>
       </header>
-      <main className="page">{route === "studio" ? <StudioPage /> : <OpsPage />}</main>
+      <main className="page">{route === "setup" ? <SetupPage /> : route === "studio" ? <StudioPage /> : <OpsPage />}</main>
     </div>
   );
 }

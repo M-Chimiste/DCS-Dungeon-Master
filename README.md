@@ -6,13 +6,14 @@ The system sits between DCS/Olympus/DCS-gRPC and one or more LLM backends. It bu
 
 ## Current Status
 
-Milestones 0-8 are implemented, and Milestone 10 now adds a first web UI/API slice for Campaign Studio and Live Ops.
+Milestones 0-8 are implemented, Milestone 9 evaluation tooling is implemented, and the Milestone 10 / 10.1 web UI plus routing/catalog work is in the repo.
 
-Milestone 9 evaluation tooling is implemented, but the real baseline matrix still needs to be run against live-capable simulator/model endpoints before it should be considered operationally signed off.
+The main remaining non-code caveat is operational: Milestone 9 still needs a real baseline matrix run against live-capable simulator and model endpoints before it should be considered fully signed off in practice.
 
 What already works in-repo:
 
-- authored Persian Gulf scenario and SQLite-backed scenario state
+- authored baseline scenarios for Persian Gulf, Syria, Afghanistan, Iraq, and Fulda Gap
+- SQLite-backed scenario state and replayable run persistence
 - Olympus and DCS-gRPC integration layers
 - internal world state, evidence ledger, and fog-of-war fusion
 - canonical observation building with optional image attachments
@@ -22,6 +23,7 @@ What already works in-repo:
 - operator controls, replay export, and run inspection
 - evaluation summaries, fairness review, and matrix tooling
 - web UI API plus a React/Vite Studio and Ops shell
+- setup/config validation wizard and persisted-run continuation flows
 
 ## Requirements
 
@@ -47,6 +49,8 @@ Run tests:
 uv run pytest
 ```
 
+Current suite status in-repo: `88 passed`
+
 ## Default Config
 
 The default config is [config/milestone0.toml](/Users/c/software_projects/DCS-Dungeon-Master/config/milestone0.toml).
@@ -57,7 +61,7 @@ Important defaults:
 - SQLite DB: `.cache/dcs-dungeon-master/state.sqlite3`
 - shared primary catalog entry: `local_gemma`
 - shared fallback catalog entry: `hosted_gpt5`
-- multimodal attachments: disabled globally by default
+- multimodal attachments: supported but disabled globally by default
 - runtime mode: `dry`
 
 If you want to test quickly, it is usually easiest to copy that file and make a local variant:
@@ -66,8 +70,15 @@ If you want to test quickly, it is usually easiest to copy that file and make a 
 cp config/milestone0.toml config/local.toml
 ```
 
+Or generate a local config with the setup wizard:
+
+```bash
+uv run dcs-dungeon-master setup-write-config --config config/milestone0.toml --output config/local.toml
+```
+
 Then edit:
 
+- scenario selection
 - model catalog entries
 - model endpoints
 - enabled backends
@@ -76,6 +87,20 @@ Then edit:
 - `multimodal.enabled`
 
 ## Fastest Smoke Test
+
+If you want to validate your local DCS/Olympus/gRPC setup first:
+
+```bash
+uv run dcs-dungeon-master setup-check --config config/milestone0.toml
+```
+
+The setup wizard checks:
+
+- DCS Saved Games path detection or manual override
+- `Config/autoexec.cfg` Olympus permission lines
+- Olympus endpoint health
+- DCS-gRPC endpoint and metadata probe
+- current config readability
 
 1. Validate the scenario:
 
@@ -102,6 +127,12 @@ uv run dcs-dungeon-master audit-milestones --config config/milestone0.toml
 ```
 
 That path does not require a live simulator or model backend.
+
+If you want an even quicker confidence check after that:
+
+```bash
+uv run dcs-dungeon-master check-model-backends --config config/milestone0.toml
+```
 
 ## Common Local Workflows
 
@@ -161,6 +192,7 @@ The Vite app defaults to [http://127.0.0.1:5173](http://127.0.0.1:5173) and prox
 
 Current Milestone 10.1 QoL improvements:
 
+- Setup tab for local environment checks and local config generation
 - Campaign Studio drafts auto-save after a short delay
 - draft lifecycle actions: rename, duplicate, revert, delete
 - click-to-select sector and control-point editing on the map
@@ -170,6 +202,12 @@ Current Milestone 10.1 QoL improvements:
 - catalog-driven run creation with one shared model for both sides by default
 - optional split REDFOR/BLUFOR routing and advanced run-scoped ad-hoc model overrides
 
+Current UI shape:
+
+- `Setup`: local environment checks, Saved Games path override, and `config/local.toml` generation
+- `Studio`: scenario authoring, draft lifecycle, map-driven sector/control-point editing, restriction editing
+- `Ops`: continue existing runs, run setup, model catalog selection, routing inspection, operator map, commander-safe previews
+
 Useful direct API checks:
 
 ```bash
@@ -177,6 +215,7 @@ curl http://127.0.0.1:8080/api/scenarios
 curl http://127.0.0.1:8080/api/runs
 curl http://127.0.0.1:8080/api/scenarios/drafts
 curl http://127.0.0.1:8080/api/model-catalog
+curl http://127.0.0.1:8080/api/setup/status
 ```
 
 Live Ops run setup now supports:
@@ -185,6 +224,69 @@ Live Ops run setup now supports:
 - a shared catalog preset for both sides by default
 - optional side-specific primary/fallback overrides
 - optional advanced ad-hoc model/URL overrides for one run
+
+The default operator flow is:
+
+1. run `setup-check` or open the `Setup` tab
+2. write `config/local.toml` if you need a machine-specific config
+3. either continue an existing run or pick a scenario for a new one
+4. leave `Use same model for both sides` enabled unless you need asymmetry
+5. choose `Local Gemma` or another catalog preset
+6. create a dry run or continue the selected run
+7. inspect the run in Ops or drive it from the CLI
+
+### 3.6. Continue an existing run
+
+List persisted runs and resumable runs:
+
+```bash
+uv run dcs-dungeon-master run-list --config config/milestone0.toml
+```
+
+Open the latest persisted run:
+
+```bash
+uv run dcs-dungeon-master run-open-latest --config config/milestone0.toml
+```
+
+Continue a specific run:
+
+```bash
+uv run dcs-dungeon-master run-continue \
+  --config config/milestone0.toml \
+  --run-id YOUR_RUN_ID
+```
+
+This pass supports continuing existing harness-managed runs already stored in SQLite. It does not yet attach to an unrelated live mission or import arbitrary external save files.
+
+### 3.7. Setup wizard
+
+Run the guided readiness check:
+
+```bash
+uv run dcs-dungeon-master setup-wizard --config config/milestone0.toml
+```
+
+Manual override example:
+
+```bash
+uv run dcs-dungeon-master setup-wizard \
+  --config config/milestone0.toml \
+  --saved-games "C:\\Users\\YOU\\Saved Games\\DCS.openbeta" \
+  --olympus-url http://127.0.0.1:4512 \
+  --grpc-host 127.0.0.1 \
+  --grpc-port 50051
+```
+
+Write a generated local config:
+
+```bash
+uv run dcs-dungeon-master setup-write-config \
+  --config config/milestone0.toml \
+  --output config/local.toml
+```
+
+If you write the file through the wizard, it can include an optional `[setup]` section that remembers the Saved Games path for later wizard runs.
 
 ### 4. Observation and fusion inspection
 
@@ -318,6 +420,16 @@ Evaluate one run:
 uv run dcs-dungeon-master eval-run --config config/milestone0.toml
 uv run dcs-dungeon-master eval-summary --config config/milestone0.toml
 ```
+
+Run the configured matrix:
+
+```bash
+uv run dcs-dungeon-master eval-run-matrix --config config/milestone0.toml --profile phase1_baseline
+uv run dcs-dungeon-master eval-matrix-report --config config/milestone0.toml --profile phase1_baseline
+uv run dcs-dungeon-master eval-closeout-status --config config/milestone0.toml --profile phase1_baseline
+```
+
+This workflow is implemented, but a real live baseline still depends on reachable external systems.
 
 Review suspicious findings:
 

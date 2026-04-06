@@ -29,6 +29,65 @@ def test_load_config_success() -> None:
     assert config.evaluation.matrix_cases
 
 
+def test_load_config_parses_optional_setup_section(tmp_path: Path) -> None:
+    config_path = tmp_path / "setup.toml"
+    config_path.write_text(
+        """
+[runtime]
+app_name = "dcs_dungeon_master"
+environment = "test"
+dry_run = true
+
+[logging]
+level = "INFO"
+format = "text"
+
+[dcs]
+remote_hosted = false
+
+[dcs.olympus]
+base_url = "http://127.0.0.1:4512"
+timeout_sec = 5.0
+
+[dcs.grpc]
+host = "127.0.0.1"
+port = 50051
+timeout_sec = 5.0
+
+[[models]]
+name = "local_default"
+hosting_mode = "local"
+endpoint = "http://127.0.0.1:1234/v1"
+model = "gemma-4-26b-a4b-it"
+enabled = true
+
+[model_routing]
+red_backend = "local_default"
+blue_backend = "local_default"
+
+[scenario]
+id = "phase1_baseline_persian_gulf"
+registry_path = "scenarios/index.toml"
+
+[persistence]
+db_path = "/tmp/dcs.sqlite3"
+enable_wal = true
+
+[dry_run]
+enabled = true
+summary_output = "text"
+
+[setup]
+saved_games_path = "C:\\\\Users\\\\Operator\\\\Saved Games\\\\DCS.openbeta"
+""".strip(),
+        encoding="utf-8",
+    )
+
+    config = load_config(config_path)
+
+    assert config.setup.saved_games_path == "C:\\Users\\Operator\\Saved Games\\DCS.openbeta"
+
+
 def test_load_config_failure_for_missing_required_section(tmp_path: Path) -> None:
     broken_config = tmp_path / "broken.toml"
     broken_config.write_text("[runtime]\napp_name='test'\nenvironment='dev'\ndry_run=true\n", encoding="utf-8")
