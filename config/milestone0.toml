@@ -1,0 +1,146 @@
+[runtime]
+app_name = "dcs_dungeon_master"
+environment = "development"
+dry_run = true
+
+[logging]
+level = "INFO"
+format = "text"
+
+[dcs]
+remote_hosted = false
+
+[dcs.olympus]
+base_url = "http://127.0.0.1:4512"
+timeout_sec = 5.0
+verify_tls = true
+health_path = "/olympus/mission"
+retry_attempts = 1
+
+[dcs.grpc]
+host = "127.0.0.1"
+port = 50051
+timeout_sec = 5.0
+secure = false
+retry_attempts = 1
+
+[[models]]
+name = "local_default"
+hosting_mode = "local"
+endpoint = "http://127.0.0.1:1234/v1"
+model = "gemma-4-26b-a4b-it"
+enabled = true
+multimodal = true
+timeout_sec = 30.0
+max_retries = 1
+temperature = 0.2
+max_output_tokens = 1200
+system_prompt_variant = "phase1_default"
+
+[[models]]
+name = "lan_default"
+hosting_mode = "lan"
+endpoint = "http://192.168.1.10:1234/v1"
+model = "gemma-4-26b-a4b-it"
+enabled = false
+multimodal = false
+timeout_sec = 30.0
+max_retries = 1
+temperature = 0.2
+max_output_tokens = 1200
+system_prompt_variant = "phase1_default"
+
+[[models]]
+name = "hosted_default"
+hosting_mode = "hosted"
+endpoint = "https://api.openai.com/v1"
+model = "gpt-5"
+enabled = true
+multimodal = false
+api_key_env_var = "OPENAI_API_KEY"
+timeout_sec = 30.0
+max_retries = 1
+temperature = 0.2
+max_output_tokens = 1200
+system_prompt_variant = "phase1_default"
+
+[[model_catalog]]
+id = "local_gemma"
+display_name = "Local Gemma"
+backend_name = "local_default"
+server_label = "LM Studio (Local)"
+tags = ["local", "fast"]
+
+[[model_catalog]]
+id = "hosted_gpt5"
+display_name = "Hosted GPT-5"
+backend_name = "hosted_default"
+server_label = "OpenAI"
+tags = ["hosted", "fallback"]
+
+[model_routing]
+default_backend = "local_gemma"
+default_fallback_backend = "hosted_gpt5"
+
+[scenario]
+id = "phase1_baseline_persian_gulf"
+registry_path = "scenarios/index.toml"
+
+[persistence]
+db_path = ".cache/dcs-dungeon-master/state.sqlite3"
+enable_wal = true
+
+[dry_run]
+enabled = true
+summary_output = "text"
+
+[fog_of_war]
+freshness_window_sec = 300
+decay_window_sec = 900
+archive_window_sec = 1800
+adjacency_drift_enabled = true
+inference_mode = "conservative"
+debug_truth_comparison = false
+
+[multimodal]
+enabled = false
+output_dir = ".cache/dcs-dungeon-master/attachments"
+
+[evaluation]
+profile_name = "phase1_baseline"
+decision_cadence_sec = 30
+prompt_version = "phase1_default"
+resource_settings_version = "phase1_default"
+review_policy = "suspicious_only"
+fairness_mode = "hybrid"
+default_run_cycles = 90
+
+[[evaluation.matrix_cases]]
+id = "mirror_live"
+description = "Mirror live run with the default local backend on both sides."
+mode = "live"
+red_backend = "local_default"
+blue_backend = "local_default"
+decision_cadence_sec = 30
+run_cycles = 90
+repeat_count = 3
+
+[[evaluation.matrix_cases]]
+id = "mixed_live"
+description = "Mixed-backend live comparison."
+mode = "live"
+red_backend = "local_default"
+blue_backend = "hosted_default"
+decision_cadence_sec = 30
+run_cycles = 90
+repeat_count = 1
+
+[[evaluation.matrix_cases]]
+id = "dry_validation"
+description = "Dry validation run with full logging."
+mode = "dry"
+red_backend = "local_default"
+blue_backend = "local_default"
+decision_cadence_sec = 30
+run_cycles = 20
+repeat_count = 1

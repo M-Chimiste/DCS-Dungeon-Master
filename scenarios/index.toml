@@ -1,0 +1,34 @@
+[[scenarios]]
+id = "phase1_baseline_persian_gulf"
+name = "Phase 1 Baseline: Persian Gulf Frontier"
+theater = "Persian Gulf"
+path = "phase1_baseline_persian_gulf.toml"
+summary = "Compact Persian Gulf corridor scenario for dual strategic commanders with contested center sectors."
+
+[[scenarios]]
+id = "phase1_baseline_syria"
+name = "Phase 1 Baseline: Syria Frontier"
+theater = "Syria"
+path = "phase1_baseline_syria.toml"
+summary = "Compact Syria corridor scenario with coastal rear areas, inland fronts, and contested central objectives."
+
+[[scenarios]]
+id = "phase1_baseline_afghanistan"
+name = "Phase 1 Baseline: Afghanistan Frontier"
+theater = "Afghanistan"
+path = "phase1_baseline_afghanistan.toml"
+summary = "Compact Afghanistan valley-corridor scenario with rear airbases, mountainous central objectives, and bounded reserves."
+
+[[scenarios]]
+id = "phase1_baseline_iraq"
+name = "Phase 1 Baseline: Iraq Frontier"
+theater = "Iraq"
+path = "phase1_baseline_iraq.toml"
+summary = "Compact Iraq river-valley scenario with rear staging sectors, contested middle approaches, and dual central objectives."
+
+[[scenarios]]
+id = "phase1_baseline_fulda_gap"
+name = "Phase 1 Baseline: Fulda Gap Frontier"
+theater = "Fulda Gap"
+path = "phase1_baseline_fulda_gap.toml"
+summary = "Compact Central Europe corridor scenario inspired by the Fulda Gap with bounded fronts, central objectives, and air corridor pressure."

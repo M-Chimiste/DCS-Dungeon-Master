@@ -8,6 +8,21 @@ DCS Dungeon Master
 
 Draft 0.1
 
+## Milestone Status
+
+- `Milestone 0`: `implemented`
+- `Milestone 1`: `implemented`
+- `Milestone 2`: `implemented`
+- `Milestone 3`: `implemented`
+- `Milestone 4`: `implemented`
+- `Milestone 5`: `implemented`
+- `Milestone 6`: `implemented`
+- `Milestone 7`: `implemented`
+- `Milestone 8`: `implemented`
+- `Milestone 9`: `implemented_with_gaps`
+
+The remaining `implemented_with_gaps` milestone is working in the repo, but still needs a real operational baseline matrix run and checked-in tuning/report artifacts before it should be treated as fully signed off.
+
 ## Purpose
 
 This document converts the planning documents into a milestone-based implementation plan for Phase 1. It defines the recommended build order, key workstreams, milestone goals, concrete tasks, expected deliverables, dependencies, and exit criteria.
@@ -110,7 +125,7 @@ Build the scenario and persistence foundation that defines what world exists and
 
 ### Tasks
 
-- Encode the `Phase 1 Baseline: Caucasus Frontier` scenario
+- Encode the `Phase 1 Baseline: Persian Gulf Frontier` scenario
 - Represent the sector graph and control points
 - Represent coalition state, starting forces, and reserve pools
 - Represent resource budgets and deployment restrictions

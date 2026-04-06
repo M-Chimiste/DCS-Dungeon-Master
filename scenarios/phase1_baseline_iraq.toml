@@ -1,0 +1,372 @@
+id = "phase1_baseline_iraq"
+version = "1"
+name = "Phase 1 Baseline: Iraq Frontier"
+theater = "Iraq"
+summary = "Sector-first Iraq baseline with river-valley rear sectors, contested central approaches, and a bounded air corridor."
+
+[[sectors]]
+id = "red_rear"
+name = "Red Northern Rear"
+role = "rear"
+neighbor_ids = ["red_front"]
+tags = ["rear", "staging", "airbase", "north"]
+center_lat = 36.23
+center_lng = 43.98
+radius_nm = 46.0
+
+[[sectors]]
+id = "red_front"
+name = "Red Central Front"
+role = "front"
+neighbor_ids = ["red_rear", "central_west", "central_east", "central_air_corridor"]
+tags = ["frontline", "air_defense", "river_valley"]
+center_lat = 35.32
+center_lng = 43.83
+radius_nm = 38.0
+
+[[sectors]]
+id = "central_west"
+name = "Western Central Corridor"
+role = "contested"
+neighbor_ids = ["red_front", "blue_front", "central_east"]
+tags = ["contested", "ground_approach", "desert_edge"]
+center_lat = 34.52
+center_lng = 43.31
+radius_nm = 34.0
+
+[[sectors]]
+id = "central_east"
+name = "Eastern Central Corridor"
+role = "contested"
+neighbor_ids = ["red_front", "blue_front", "central_west"]
+tags = ["contested", "river_crossing", "ground_approach"]
+center_lat = 33.98
+center_lng = 44.42
+radius_nm = 34.0
+
+[[sectors]]
+id = "blue_front"
+name = "Blue Southern Front"
+role = "front"
+neighbor_ids = ["blue_rear", "central_west", "central_east", "central_air_corridor"]
+tags = ["frontline", "air_defense", "southern"]
+center_lat = 32.89
+center_lng = 45.09
+radius_nm = 38.0
+
+[[sectors]]
+id = "blue_rear"
+name = "Blue Southern Rear"
+role = "rear"
+neighbor_ids = ["blue_front"]
+tags = ["rear", "staging", "airbase", "southern"]
+center_lat = 30.57
+center_lng = 47.79
+radius_nm = 48.0
+
+[[sectors]]
+id = "central_air_corridor"
+name = "Tigris Air Corridor"
+role = "air_corridor"
+neighbor_ids = ["red_front", "blue_front"]
+tags = ["air_corridor", "sensor_approach", "river"]
+center_lat = 34.15
+center_lng = 44.15
+radius_nm = 42.0
+
+[[control_points]]
+id = "red_rear_airbase"
+name = "Mosul Airbase"
+sector_id = "red_rear"
+kind = "rear_airbase"
+owner = "red"
+strategic_value = "high"
+lat = 36.3058
+lng = 43.1474
+
+[[control_points]]
+id = "blue_rear_airbase"
+name = "Basra Air Station"
+sector_id = "blue_rear"
+kind = "rear_airbase"
+owner = "blue"
+strategic_value = "high"
+lat = 30.5491
+lng = 47.6621
+
+[[control_points]]
+id = "red_forward_support"
+name = "Tikrit Forward Support"
+sector_id = "red_front"
+kind = "forward_support"
+owner = "red"
+strategic_value = "medium"
+lat = 34.67
+lng = 43.68
+
+[[control_points]]
+id = "blue_forward_support"
+name = "Kut Forward Support"
+sector_id = "blue_front"
+kind = "forward_support"
+owner = "blue"
+strategic_value = "medium"
+lat = 32.49
+lng = 45.82
+
+[[control_points]]
+id = "central_objective_west"
+name = "Ramadi Corridor Objective"
+sector_id = "central_west"
+kind = "central_objective"
+strategic_value = "high"
+lat = 33.43
+lng = 43.30
+
+[[control_points]]
+id = "central_objective_east"
+name = "Baghdad River Objective"
+sector_id = "central_east"
+kind = "central_objective"
+strategic_value = "high"
+lat = 33.31
+lng = 44.36
+
+[[zones]]
+id = "red_rear_fallback_zone"
+name = "Red Rear Fallback Zone"
+sector_id = "red_rear"
+center_lat = 36.09
+center_lng = 43.78
+radius_nm = 18.0
+tags = ["fallback", "rear", "support"]
+
+[[zones]]
+id = "red_front_support_zone"
+name = "Red Front Support Zone"
+sector_id = "red_front"
+center_lat = 35.05
+center_lng = 43.74
+radius_nm = 14.0
+tags = ["support", "frontline"]
+
+[[zones]]
+id = "blue_front_support_zone"
+name = "Blue Front Support Zone"
+sector_id = "blue_front"
+center_lat = 32.79
+center_lng = 45.18
+radius_nm = 14.0
+tags = ["support", "frontline"]
+
+[[zones]]
+id = "blue_rear_fallback_zone"
+name = "Blue Rear Fallback Zone"
+sector_id = "blue_rear"
+center_lat = 30.44
+center_lng = 47.62
+radius_nm = 18.0
+tags = ["fallback", "rear", "support"]
+
+[[coalitions]]
+coalition = "red"
+budget_remaining = 24
+objectives = ["hold_red_front", "contest_central_objectives", "protect_mosul"]
+reserve_ids = ["red_reserve_sam", "red_reserve_mech", "red_reserve_shorad"]
+attrition_pool = 0
+replacement_pool = 0
+
+[[coalitions.standing_orders]]
+id = "red_defend_front"
+text = "Maintain pressure on the central front and preserve the northern airbase."
+active = true
+
+[[coalitions]]
+coalition = "blue"
+budget_remaining = 24
+objectives = ["hold_blue_front", "contest_central_objectives", "protect_basra"]
+reserve_ids = ["blue_reserve_sam", "blue_reserve_mech", "blue_reserve_shorad"]
+attrition_pool = 0
+replacement_pool = 0
+
+[[coalitions.standing_orders]]
+id = "blue_defend_front"
+text = "Maintain coverage on the southern front and preserve the rear air station."
+active = true
+
+[[active_groups]]
+id = "red_rear_ad"
+coalition = "red"
+group_type = "rear_air_defense_cluster"
+posture = "defensive"
+sector_id = "red_rear"
+mobile = false
+status = "ready"
+control_point_id = "red_rear_airbase"
+
+[[active_groups]]
+id = "red_front_ad"
+coalition = "red"
+group_type = "forward_air_defense_group"
+posture = "defensive"
+sector_id = "red_front"
+mobile = true
+status = "ready"
+control_point_id = "red_forward_support"
+
+[[active_groups]]
+id = "red_ground_group"
+coalition = "red"
+group_type = "ground_maneuver_group"
+posture = "reserve"
+sector_id = "red_front"
+mobile = true
+status = "ready"
+
+[[active_groups]]
+id = "red_fires_group"
+coalition = "red"
+group_type = "fires_group"
+posture = "support"
+sector_id = "red_rear"
+mobile = true
+status = "ready"
+
+[[active_groups]]
+id = "red_screen_group"
+coalition = "red"
+group_type = "screening_group"
+posture = "screening"
+sector_id = "red_front"
+mobile = true
+status = "ready"
+
+[[active_groups]]
+id = "blue_rear_ad"
+coalition = "blue"
+group_type = "rear_air_defense_cluster"
+posture = "defensive"
+sector_id = "blue_rear"
+mobile = false
+status = "ready"
+control_point_id = "blue_rear_airbase"
+
+[[active_groups]]
+id = "blue_front_ad"
+coalition = "blue"
+group_type = "forward_air_defense_group"
+posture = "defensive"
+sector_id = "blue_front"
+mobile = true
+status = "ready"
+control_point_id = "blue_forward_support"
+
+[[active_groups]]
+id = "blue_ground_group"
+coalition = "blue"
+group_type = "ground_maneuver_group"
+posture = "reserve"
+sector_id = "blue_front"
+mobile = true
+status = "ready"
+
+[[active_groups]]
+id = "blue_fires_group"
+coalition = "blue"
+group_type = "fires_group"
+posture = "support"
+sector_id = "blue_rear"
+mobile = true
+status = "ready"
+
+[[active_groups]]
+id = "blue_screen_group"
+coalition = "blue"
+group_type = "screening_group"
+posture = "screening"
+sector_id = "blue_front"
+mobile = true
+status = "ready"
+
+[[reserve_groups]]
+id = "red_reserve_sam"
+coalition = "red"
+group_type = "mobile_sam_reserve"
+available = true
+cost = 6
+allowed_sector_ids = ["red_front", "red_rear", "central_west", "central_east"]
+status = "available"
+emergency = false
+
+[[reserve_groups]]
+id = "red_reserve_mech"
+coalition = "red"
+group_type = "mechanized_reserve"
+available = true
+cost = 5
+allowed_sector_ids = ["red_front", "central_west", "central_east"]
+status = "available"
+emergency = false
+
+[[reserve_groups]]
+id = "red_reserve_shorad"
+coalition = "red"
+group_type = "short_range_air_defense_reserve"
+available = true
+cost = 4
+allowed_sector_ids = ["red_front", "red_rear"]
+status = "available"
+emergency = false
+
+[[reserve_groups]]
+id = "blue_reserve_sam"
+coalition = "blue"
+group_type = "mobile_sam_reserve"
+available = true
+cost = 6
+allowed_sector_ids = ["blue_front", "blue_rear", "central_west", "central_east"]
+status = "available"
+emergency = false
+
+[[reserve_groups]]
+id = "blue_reserve_mech"
+coalition = "blue"
+group_type = "mechanized_reserve"
+available = true
+cost = 5
+allowed_sector_ids = ["blue_front", "central_west", "central_east"]
+status = "available"
+emergency = false
+
+[[reserve_groups]]
+id = "blue_reserve_shorad"
+coalition = "blue"
+group_type = "short_range_air_defense_reserve"
+available = true
+cost = 4
+allowed_sector_ids = ["blue_front", "blue_rear"]
+status = "available"
+emergency = false
+
+[[deployment_restrictions]]
+id = "red_no_deploy_blue_rear"
+coalition = "red"
+restriction_type = "no_deploy_zone"
+description = "Red cannot deploy directly into blue rear staging areas."
+sector_ids = ["blue_rear"]
+adjacency_limited = false
+
+[[deployment_restrictions]]
+id = "blue_no_deploy_red_rear"
+coalition = "blue"
+restriction_type = "no_deploy_zone"
+description = "Blue cannot deploy directly into red rear staging areas."
+sector_ids = ["red_rear"]
+adjacency_limited = false
+
+[[deployment_restrictions]]
+id = "frontline_adjacency_rule"
+restriction_type = "adjacency_rule"
+description = "Forward deployments must respect sector adjacency unless explicitly allowed by reserve rules."
+sector_ids = ["red_front", "blue_front", "central_west", "central_east"]
+adjacency_limited = true

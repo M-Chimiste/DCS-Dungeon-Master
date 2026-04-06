@@ -41,6 +41,14 @@ Phase 1 assumptions:
 - Replayability: every major decision boundary should be loggable and reproducible
 - Separation of concerns: perception, state, reasoning, validation, and execution should stay distinct
 
+## Current Implementation Notes
+
+- The only real model transport implemented today is an OpenAI-compatible adapter, primarily targeting LM Studio and similar endpoints.
+- Structured JSON output is the primary model-return path and is preferred over free-form text responses.
+- Optional multimodal support is implemented as a backend-gated image attachment path. Structured JSON remains authoritative even when an attachment is submitted alongside the canonical observation.
+- Backend failover is implemented as one primary backend plus one optional fallback backend per coalition. Failover is only used for transport or parse failure and reuses the same observation snapshot.
+- Action validation is constrained to scenario-known, coalition-owned, and coalition-visible data. Hidden world truth is not part of legality decisions.
+
 ## System Context
 
 At a high level, the harness sits between DCS World and one or more LLM backends.

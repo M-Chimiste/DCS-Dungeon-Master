@@ -159,7 +159,7 @@ Phase 1 should start with a small but useful matrix.
 
 ## Scenario Under Test
 
-The default evaluation scenario is `Phase 1 Baseline: Caucasus Frontier` from `project-docs/SCENARIO-SPEC.md`.
+The default evaluation scenario is `Phase 1 Baseline: Persian Gulf Frontier` from `project-docs/SCENARIO-SPEC.md`.
 
 Default parameters:
 

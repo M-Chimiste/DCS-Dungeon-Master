@@ -1,0 +1,43 @@
+syntax = "proto3";
+
+package dcs.mission.v0;
+
+import "dcs/common/v0/common.proto";
+
+message MissionMetadataRequest {}
+
+message MissionMetadata {
+  string theater = 1;
+  string mission_name = 2;
+  string mission_time = 3;
+}
+
+message StreamUnitsRequest {
+  double poll_rate = 1;
+  string coalition = 2;
+}
+
+message UnitEvent {
+  string unit_id = 1;
+  string coalition = 2;
+  string category = 3;
+  string name = 4;
+  double lat = 5;
+  double lng = 6;
+  double alt = 7;
+}
+
+message StreamEventsRequest {}
+
+message MissionEvent {
+  string event_id = 1;
+  string event_type = 2;
+  string coalition = 3;
+  string description = 4;
+}
+
+service MissionService {
+  rpc GetMissionMetadata(MissionMetadataRequest) returns (MissionMetadata);
+  rpc StreamUnits(StreamUnitsRequest) returns (stream UnitEvent);
+  rpc StreamEvents(StreamEventsRequest) returns (stream MissionEvent);
+}
