@@ -14,19 +14,23 @@ import httpx
 
 from dcs_dungeon_master.action_validation import ActionValidator
 from dcs_dungeon_master.core.config import AppConfig, ModelBackendConfig, ModelRoutingConfig
-from dcs_dungeon_master.core.enums import ActionType, Coalition, RunLifecycleStatus
+from dcs_dungeon_master.core.enums import ActionType, Coalition, ModelHostingMode, RunLifecycleStatus
 from dcs_dungeon_master.core.exceptions import IntegrationError, PersistenceError
 from dcs_dungeon_master.core.models import (
     CommanderObservation,
     DecisionCycleResult,
     LoopRunResult,
     ModelBackendCapability,
+    ModelCatalogEntry,
     ModelInvocationAttempt,
     ModelInvocationChainResult,
     ModelInvocationRequest,
     ModelInvocationResult,
     ObservationArtifact,
     ParsedActionProposal,
+    ResolvedCoalitionRouting,
+    ResolvedRunRouting,
+    RunScopedBackendDefinition,
 )
 from dcs_dungeon_master.integration.ingest import IntegrationIngestCoordinator
 from dcs_dungeon_master.core.versions import ACTION_SCHEMA_VERSION
@@ -232,6 +236,7 @@ class ModelAdapterRegistry:
     backends: dict[str, OpenAICompatibleAdapter]
     routing: ModelRoutingConfig
     capabilities: tuple[ModelBackendCapability, ...]
+    catalog: tuple[ModelCatalogEntry, ...] = ()
 
     @property
     def status(self) -> str:
@@ -264,6 +269,9 @@ class ModelAdapterRegistry:
 
     def describe_backends(self) -> tuple[ModelBackendCapability, ...]:
         return self.capabilities
+
+    def list_catalog(self) -> tuple[ModelCatalogEntry, ...]:
+        return tuple(item for item in self.catalog if item.enabled and not item.hidden)
 
     def close(self) -> None:
         for adapter in self.backends.values():
@@ -576,11 +584,48 @@ class DryDecisionLoopRunner:
 def build_model_registry(
     config: AppConfig,
     *,
+    routing: ModelRoutingConfig | None = None,
+    run_scoped_backends: tuple[RunScopedBackendDefinition, ...] = (),
     transports: dict[str, httpx.BaseTransport] | None = None,
 ) -> ModelAdapterRegistry:
     adapters: dict[str, OpenAICompatibleAdapter] = {}
     capabilities: list[ModelBackendCapability] = []
-    for backend in config.models:
+    catalog_entries: list[ModelCatalogEntry] = []
+    backend_configs = list(config.models)
+    for scoped_backend in run_scoped_backends:
+        backend_configs.append(
+            ModelBackendConfig(
+                name=scoped_backend.backend_name,
+                hosting_mode=ModelHostingMode(scoped_backend.hosting_mode),
+                endpoint=scoped_backend.endpoint,
+                model=scoped_backend.model,
+                enabled=True,
+                multimodal=scoped_backend.multimodal,
+                api_key_env_var=scoped_backend.api_key_env_var,
+                timeout_sec=scoped_backend.timeout_sec,
+                max_retries=scoped_backend.max_retries,
+                temperature=scoped_backend.temperature,
+                max_output_tokens=scoped_backend.max_output_tokens,
+                system_prompt_variant=scoped_backend.system_prompt_variant,
+            )
+        )
+        catalog_entries.append(
+            ModelCatalogEntry(
+                catalog_id=scoped_backend.backend_name,
+                display_name=scoped_backend.display_name,
+                backend_name=scoped_backend.backend_name,
+                server_label=scoped_backend.source_label or "ad-hoc",
+                endpoint=scoped_backend.endpoint,
+                model=scoped_backend.model,
+                hosting_mode=scoped_backend.hosting_mode,
+                supports_structured_output=True,
+                supports_multimodal=scoped_backend.multimodal,
+                enabled=True,
+                hidden=False,
+                tags=("ad-hoc",),
+            )
+        )
+    for backend in backend_configs:
         transport = transports.get(backend.name) if transports else None
         adapters[backend.name] = OpenAICompatibleAdapter(backend, transport=transport)
         capabilities.append(
@@ -593,4 +638,28 @@ def build_model_registry(
                 supports_multimodal=backend.multimodal,
             )
         )
-    return ModelAdapterRegistry(backends=adapters, routing=config.model_routing, capabilities=tuple(capabilities))
+    configured_catalog = [
+        ModelCatalogEntry(
+            catalog_id=entry.id,
+            display_name=entry.display_name,
+            backend_name=entry.backend_name,
+            server_label=entry.server_label,
+            endpoint=adapters[entry.backend_name].config.endpoint,
+            model=adapters[entry.backend_name].config.model,
+            hosting_mode=adapters[entry.backend_name].config.hosting_mode.value,
+            supports_structured_output=True,
+            supports_multimodal=adapters[entry.backend_name].config.multimodal,
+            enabled=entry.enabled,
+            hidden=entry.hidden,
+            tags=entry.tags,
+        )
+        for entry in config.model_catalog
+        if entry.backend_name in adapters
+    ]
+    catalog_entries = configured_catalog + catalog_entries
+    return ModelAdapterRegistry(
+        backends=adapters,
+        routing=routing or config.model_routing,
+        capabilities=tuple(capabilities),
+        catalog=tuple(catalog_entries),
+    )

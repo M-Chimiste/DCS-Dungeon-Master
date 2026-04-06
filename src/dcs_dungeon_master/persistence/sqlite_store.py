@@ -70,10 +70,13 @@ from dcs_dungeon_master.core.models import (
     ResourceStateView,
     ReplayBundleManifest,
     ReplayExportResult,
+    ResolvedCoalitionRouting,
+    ResolvedRunRouting,
     ReserveAvailabilityView,
     RunComparisonResult,
     RunControlState,
     RunFailureEntry,
+    RunScopedBackendDefinition,
     RunSummary,
     RunTimelineEntry,
     ScenarioDefinition,
@@ -128,6 +131,8 @@ class SQLiteStateStore:
                     config_snapshot_json TEXT,
                     red_backend_name TEXT,
                     blue_backend_name TEXT,
+                    routing_json TEXT,
+                    run_scoped_backends_json TEXT,
                     started_at TEXT,
                     paused_at TEXT,
                     resumed_at TEXT,
@@ -615,6 +620,8 @@ class SQLiteStateStore:
             self._ensure_column(connection, "runs", "config_snapshot_json", "TEXT")
             self._ensure_column(connection, "runs", "red_backend_name", "TEXT")
             self._ensure_column(connection, "runs", "blue_backend_name", "TEXT")
+            self._ensure_column(connection, "runs", "routing_json", "TEXT")
+            self._ensure_column(connection, "runs", "run_scoped_backends_json", "TEXT")
             self._ensure_column(connection, "runs", "started_at", "TEXT")
             self._ensure_column(connection, "runs", "paused_at", "TEXT")
             self._ensure_column(connection, "runs", "resumed_at", "TEXT")
@@ -634,18 +641,23 @@ class SQLiteStateStore:
         config_snapshot: dict[str, Any] | None = None,
         red_backend_name: str | None = None,
         blue_backend_name: str | None = None,
+        routing: ResolvedRunRouting | None = None,
+        run_scoped_backends: tuple[RunScopedBackendDefinition, ...] = (),
         evaluation_metadata: dict[str, Any] | None = None,
     ) -> str:
         self.initialize_schema()
         run_id = uuid4().hex
         created_at = datetime.now(UTC)
+        resolved_red_backend_name = red_backend_name or (routing.red.primary_backend_name if routing is not None else None)
+        resolved_blue_backend_name = blue_backend_name or (routing.blue.primary_backend_name if routing is not None else None)
         with self._connect() as connection:
             connection.execute(
                 """
                 INSERT INTO runs (
                     run_id, scenario_id, scenario_version, scenario_name, theater, created_at, mode, status,
-                    config_digest, config_snapshot_json, red_backend_name, blue_backend_name, evaluation_metadata_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    config_digest, config_snapshot_json, red_backend_name, blue_backend_name, routing_json,
+                    run_scoped_backends_json, evaluation_metadata_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     run_id,
@@ -658,8 +670,10 @@ class SQLiteStateStore:
                     RunLifecycleStatus.CREATED.value,
                     config_digest,
                     _json(config_snapshot) if config_snapshot is not None else None,
-                    red_backend_name,
-                    blue_backend_name,
+                    resolved_red_backend_name,
+                    resolved_blue_backend_name,
+                    _json(asdict(routing)) if routing is not None else None,
+                    _json([asdict(item) for item in run_scoped_backends]),
                     _json(evaluation_metadata) if evaluation_metadata is not None else None,
                 ),
             )
@@ -903,7 +917,8 @@ class SQLiteStateStore:
             row = connection.execute(
                 """
                 SELECT run_id, scenario_id, scenario_version, scenario_name, theater, created_at, mode, status,
-                       config_digest, config_snapshot_json, red_backend_name, blue_backend_name,
+                       config_digest, config_snapshot_json, red_backend_name, blue_backend_name, routing_json,
+                       run_scoped_backends_json,
                        started_at, paused_at, resumed_at, stopped_at, failed_at, terminal_reason,
                        evaluation_metadata_json
                 FROM runs
@@ -920,7 +935,8 @@ class SQLiteStateStore:
             rows = connection.execute(
                 """
                 SELECT run_id, scenario_id, scenario_version, scenario_name, theater, mode, status, created_at,
-                       config_digest, config_snapshot_json, red_backend_name, blue_backend_name, started_at,
+                       config_digest, config_snapshot_json, red_backend_name, blue_backend_name, routing_json,
+                       run_scoped_backends_json, started_at,
                        paused_at, resumed_at, stopped_at, failed_at, terminal_reason, evaluation_metadata_json
                 FROM runs
                 ORDER BY created_at DESC, run_id DESC
@@ -973,6 +989,30 @@ class SQLiteStateStore:
                         "status": status.value,
                         "terminal_reason": terminal_reason,
                     },
+                ),
+            )
+        return self.get_run_control_state(run_id)
+
+    def update_run_routing(
+        self,
+        run_id: str,
+        routing: ResolvedRunRouting,
+        *,
+        run_scoped_backends: tuple[RunScopedBackendDefinition, ...] = (),
+    ) -> RunControlState:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE runs
+                SET red_backend_name = ?, blue_backend_name = ?, routing_json = ?, run_scoped_backends_json = ?
+                WHERE run_id = ?
+                """,
+                (
+                    routing.red.primary_backend_name,
+                    routing.blue.primary_backend_name,
+                    _json(asdict(routing)),
+                    _json([asdict(item) for item in run_scoped_backends]),
+                    run_id,
                 ),
             )
         return self.get_run_control_state(run_id)
@@ -3563,6 +3603,58 @@ class SQLiteStateStore:
             summary=tuple(json.loads(row["summary_json"])),
         )
 
+    def _parse_resolved_routing(self, payload: str | None) -> ResolvedRunRouting | None:
+        if not payload:
+            return None
+        raw = json.loads(payload)
+        return ResolvedRunRouting(
+            red=ResolvedCoalitionRouting(
+                coalition=Coalition(raw["red"]["coalition"]),
+                primary_backend_name=raw["red"]["primary_backend_name"],
+                fallback_backend_name=raw["red"].get("fallback_backend_name"),
+                primary_catalog_id=raw["red"].get("primary_catalog_id"),
+                fallback_catalog_id=raw["red"].get("fallback_catalog_id"),
+                primary_source=raw["red"].get("primary_source", "config"),
+                fallback_source=raw["red"].get("fallback_source"),
+            ),
+            blue=ResolvedCoalitionRouting(
+                coalition=Coalition(raw["blue"]["coalition"]),
+                primary_backend_name=raw["blue"]["primary_backend_name"],
+                fallback_backend_name=raw["blue"].get("fallback_backend_name"),
+                primary_catalog_id=raw["blue"].get("primary_catalog_id"),
+                fallback_catalog_id=raw["blue"].get("fallback_catalog_id"),
+                primary_source=raw["blue"].get("primary_source", "config"),
+                fallback_source=raw["blue"].get("fallback_source"),
+            ),
+            shared_primary_catalog_id=raw.get("shared_primary_catalog_id"),
+            shared_fallback_catalog_id=raw.get("shared_fallback_catalog_id"),
+            same_primary_for_both=bool(raw.get("same_primary_for_both", False)),
+            same_fallback_for_both=bool(raw.get("same_fallback_for_both", False)),
+        )
+
+    def _parse_run_scoped_backends(self, payload: str | None) -> tuple[RunScopedBackendDefinition, ...]:
+        if not payload:
+            return ()
+        raw = json.loads(payload)
+        return tuple(
+            RunScopedBackendDefinition(
+                backend_name=item["backend_name"],
+                display_name=item["display_name"],
+                endpoint=item["endpoint"],
+                model=item["model"],
+                hosting_mode=item["hosting_mode"],
+                multimodal=bool(item.get("multimodal", False)),
+                api_key_env_var=item.get("api_key_env_var"),
+                timeout_sec=float(item.get("timeout_sec", 30.0)),
+                max_retries=int(item.get("max_retries", 1)),
+                temperature=float(item.get("temperature", 0.2)),
+                max_output_tokens=item.get("max_output_tokens"),
+                system_prompt_variant=item.get("system_prompt_variant"),
+                source_label=item.get("source_label"),
+            )
+            for item in raw
+        )
+
     def _row_to_run_control_state(self, row: sqlite3.Row) -> RunControlState:
         return RunControlState(
             run_id=row["run_id"],
@@ -3577,6 +3669,8 @@ class SQLiteStateStore:
             config_snapshot=json.loads(row["config_snapshot_json"]) if row["config_snapshot_json"] else None,
             red_backend_name=row["red_backend_name"],
             blue_backend_name=row["blue_backend_name"],
+            routing=self._parse_resolved_routing(row["routing_json"]),
+            run_scoped_backends=self._parse_run_scoped_backends(row["run_scoped_backends_json"]),
             started_at=_parse_dt(row["started_at"]),
             paused_at=_parse_dt(row["paused_at"]),
             resumed_at=_parse_dt(row["resumed_at"]),

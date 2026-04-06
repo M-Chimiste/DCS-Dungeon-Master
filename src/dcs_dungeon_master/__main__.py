@@ -14,7 +14,7 @@ from typing import Sequence
 from dcs_dungeon_master.action_validation import ActionValidator
 from dcs_dungeon_master.audit import MilestoneAuditService
 from dcs_dungeon_master.app import DEFAULT_CONFIG_PATH, bootstrap_application
-from dcs_dungeon_master.core.config import load_config
+from dcs_dungeon_master.core.config import ModelRoutingConfig, load_config
 from dcs_dungeon_master.core.enums import Coalition, FairnessReviewStatus
 from dcs_dungeon_master.evaluation import EvaluationService, build_evaluation_metadata
 from dcs_dungeon_master.execution import ExecutionEngine, LiveCommandLoopRunner
@@ -40,6 +40,69 @@ def _config_digest(config) -> str:
 
 def _evaluation_metadata(config, **overrides):
     return build_evaluation_metadata(config, **overrides)
+
+
+def _resolved_run_routing_from_config(config):
+    from dcs_dungeon_master.core.models import ResolvedCoalitionRouting, ResolvedRunRouting
+
+    return ResolvedRunRouting(
+        red=ResolvedCoalitionRouting(
+            coalition=Coalition.RED,
+            primary_backend_name=config.model_routing.red_backend,
+            fallback_backend_name=config.model_routing.red_fallback_backend,
+            primary_catalog_id=config.model_routing.red_catalog_override or config.model_routing.default_catalog_id,
+            fallback_catalog_id=config.model_routing.red_fallback_catalog_override or config.model_routing.default_fallback_catalog_id,
+            primary_source="catalog" if (config.model_routing.red_catalog_override or config.model_routing.default_catalog_id) else "config",
+            fallback_source="catalog"
+            if (config.model_routing.red_fallback_catalog_override or config.model_routing.default_fallback_catalog_id)
+            else None,
+        ),
+        blue=ResolvedCoalitionRouting(
+            coalition=Coalition.BLUE,
+            primary_backend_name=config.model_routing.blue_backend,
+            fallback_backend_name=config.model_routing.blue_fallback_backend,
+            primary_catalog_id=config.model_routing.blue_catalog_override or config.model_routing.default_catalog_id,
+            fallback_catalog_id=config.model_routing.blue_fallback_catalog_override or config.model_routing.default_fallback_catalog_id,
+            primary_source="catalog" if (config.model_routing.blue_catalog_override or config.model_routing.default_catalog_id) else "config",
+            fallback_source="catalog"
+            if (config.model_routing.blue_fallback_catalog_override or config.model_routing.default_fallback_catalog_id)
+            else None,
+        ),
+        shared_primary_catalog_id=config.model_routing.default_catalog_id,
+        shared_fallback_catalog_id=config.model_routing.default_fallback_catalog_id,
+        same_primary_for_both=config.model_routing.red_backend == config.model_routing.blue_backend,
+        same_fallback_for_both=config.model_routing.red_fallback_backend == config.model_routing.blue_fallback_backend,
+    )
+
+
+def _routing_config_for_run(config, run_state):
+    if run_state.routing is None:
+        return config.model_routing
+    return ModelRoutingConfig(
+        default_backend=run_state.routing.red.primary_backend_name if run_state.routing.same_primary_for_both else None,
+        default_fallback_backend=run_state.routing.red.fallback_backend_name if run_state.routing.same_fallback_for_both else None,
+        default_catalog_id=run_state.routing.shared_primary_catalog_id,
+        default_fallback_catalog_id=run_state.routing.shared_fallback_catalog_id,
+        red_backend=run_state.routing.red.primary_backend_name,
+        blue_backend=run_state.routing.blue.primary_backend_name,
+        red_fallback_backend=run_state.routing.red.fallback_backend_name,
+        blue_fallback_backend=run_state.routing.blue.fallback_backend_name,
+        red_catalog_override=None if run_state.routing.same_primary_for_both else run_state.routing.red.primary_catalog_id,
+        blue_catalog_override=None if run_state.routing.same_primary_for_both else run_state.routing.blue.primary_catalog_id,
+        red_fallback_catalog_override=None if run_state.routing.same_fallback_for_both else run_state.routing.red.fallback_catalog_id,
+        blue_fallback_catalog_override=None if run_state.routing.same_fallback_for_both else run_state.routing.blue.fallback_catalog_id,
+    )
+
+
+def _build_model_registry_for_run(config, run_state):
+    try:
+        return build_model_registry(
+            config,
+            routing=_routing_config_for_run(config, run_state),
+            run_scoped_backends=run_state.run_scoped_backends,
+        )
+    except TypeError:
+        return build_model_registry(config)
 
 
 def _print_payload(payload) -> None:
@@ -429,6 +492,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             config_snapshot=config.to_dict(),
             red_backend_name=config.model_routing.red_backend,
             blue_backend_name=config.model_routing.blue_backend,
+            routing=_resolved_run_routing_from_config(config),
             evaluation_metadata=_evaluation_metadata(config),
         )
         print(json.dumps(store.get_run_summary(run_id), indent=2, sort_keys=True))
@@ -625,12 +689,15 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "red": {
                         "primary": config.model_routing.red_backend,
                         "fallback": config.model_routing.red_fallback_backend,
+                        "catalog_id": config.model_routing.red_catalog_override or config.model_routing.default_catalog_id,
                     },
                     "blue": {
                         "primary": config.model_routing.blue_backend,
                         "fallback": config.model_routing.blue_fallback_backend,
+                        "catalog_id": config.model_routing.blue_catalog_override or config.model_routing.default_catalog_id,
                     },
                 },
+                "catalog": [asdict(item) for item in registry.list_catalog()],
             }
         finally:
             registry.close()
@@ -707,13 +774,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         scenario = get_scenario_definition(config.scenario.id, config.scenario.registry_path)
         store = SQLiteStateStore(config.persistence.db_path, enable_wal=config.persistence.enable_wal)
         resolved_run_id = args.run_id or store.get_latest_run_id()
+        run_state = store.get_run_control_state(resolved_run_id)
         operator = OperatorControlService(store)
         world_repository = WorldStateRepository(store)
         world_updater = WorldStateUpdater(world_repository, scenario)
         observation_builder = ObservationBuilder(store, scenario, SensorFusionService(store, scenario, config.fog_of_war), config.multimodal)
         validator = ActionValidator(store, scenario)
         integrations = build_integration_services(config.dcs)
-        registry = build_model_registry(config)
+        registry = _build_model_registry_for_run(config, run_state)
         try:
             operator.ensure_cycle_allowed(resolved_run_id)
             runner = DryDecisionLoopRunner(
@@ -741,13 +809,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         scenario = get_scenario_definition(config.scenario.id, config.scenario.registry_path)
         store = SQLiteStateStore(config.persistence.db_path, enable_wal=config.persistence.enable_wal)
         resolved_run_id = args.run_id or store.get_latest_run_id()
+        run_state = store.get_run_control_state(resolved_run_id)
         operator = OperatorControlService(store)
         world_repository = WorldStateRepository(store)
         world_updater = WorldStateUpdater(world_repository, scenario)
         observation_builder = ObservationBuilder(store, scenario, SensorFusionService(store, scenario, config.fog_of_war), config.multimodal)
         validator = ActionValidator(store, scenario)
         integrations = build_integration_services(config.dcs)
-        registry = build_model_registry(config)
+        registry = _build_model_registry_for_run(config, run_state)
         try:
             operator.ensure_cycle_allowed(resolved_run_id)
             runner = DryDecisionLoopRunner(
@@ -775,9 +844,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         config = load_config(args.config)
         scenario = get_scenario_definition(config.scenario.id, config.scenario.registry_path)
         store = SQLiteStateStore(config.persistence.db_path, enable_wal=config.persistence.enable_wal)
+        run_state = store.get_run_control_state(args.run_id or store.get_latest_run_id())
         observation_builder = ObservationBuilder(store, scenario, SensorFusionService(store, scenario, config.fog_of_war), config.multimodal)
         validator = ActionValidator(store, scenario)
-        registry = build_model_registry(config)
+        registry = _build_model_registry_for_run(config, run_state)
         try:
             runner = DryDecisionLoopRunner(store, observation_builder, validator, registry)
             payload = runner.summarize_latest_response(args.run_id or store.get_latest_run_id(), Coalition(args.coalition))
@@ -791,13 +861,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         scenario = get_scenario_definition(config.scenario.id, config.scenario.registry_path)
         store = SQLiteStateStore(config.persistence.db_path, enable_wal=config.persistence.enable_wal)
         resolved_run_id = args.run_id or store.get_latest_run_id()
+        run_state = store.get_run_control_state(resolved_run_id)
         operator = OperatorControlService(store)
         world_repository = WorldStateRepository(store)
         world_updater = WorldStateUpdater(world_repository, scenario)
         observation_builder = ObservationBuilder(store, scenario, SensorFusionService(store, scenario, config.fog_of_war), config.multimodal)
         validator = ActionValidator(store, scenario)
         integrations = build_integration_services(config.dcs)
-        registry = build_model_registry(config)
+        registry = _build_model_registry_for_run(config, run_state)
         try:
             operator.ensure_cycle_allowed(resolved_run_id)
             execution_engine = ExecutionEngine(store, scenario, integrations.olympus)
@@ -827,13 +898,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         scenario = get_scenario_definition(config.scenario.id, config.scenario.registry_path)
         store = SQLiteStateStore(config.persistence.db_path, enable_wal=config.persistence.enable_wal)
         resolved_run_id = args.run_id or store.get_latest_run_id()
+        run_state = store.get_run_control_state(resolved_run_id)
         operator = OperatorControlService(store)
         world_repository = WorldStateRepository(store)
         world_updater = WorldStateUpdater(world_repository, scenario)
         observation_builder = ObservationBuilder(store, scenario, SensorFusionService(store, scenario, config.fog_of_war), config.multimodal)
         validator = ActionValidator(store, scenario)
         integrations = build_integration_services(config.dcs)
-        registry = build_model_registry(config)
+        registry = _build_model_registry_for_run(config, run_state)
         try:
             operator.ensure_cycle_allowed(resolved_run_id)
             execution_engine = ExecutionEngine(store, scenario, integrations.olympus)

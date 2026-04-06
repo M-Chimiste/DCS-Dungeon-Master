@@ -76,9 +76,32 @@ class ModelBackendConfig:
 
 
 @dataclass(slots=True, frozen=True)
+class ModelCatalogEntryConfig:
+    id: str
+    display_name: str
+    backend_name: str
+    server_label: str
+    enabled: bool = True
+    hidden: bool = False
+    tags: tuple[str, ...] = ()
+
+
+@dataclass(slots=True, frozen=True)
 class ModelRoutingConfig:
-    red_backend: str
-    blue_backend: str
+    default_backend: str | None = None
+    default_fallback_backend: str | None = None
+    red_backend_override: str | None = None
+    blue_backend_override: str | None = None
+    red_fallback_backend_override: str | None = None
+    blue_fallback_backend_override: str | None = None
+    default_catalog_id: str | None = None
+    default_fallback_catalog_id: str | None = None
+    red_catalog_override: str | None = None
+    blue_catalog_override: str | None = None
+    red_fallback_catalog_override: str | None = None
+    blue_fallback_catalog_override: str | None = None
+    red_backend: str = ""
+    blue_backend: str = ""
     red_fallback_backend: str | None = None
     blue_fallback_backend: str | None = None
 
@@ -151,7 +174,8 @@ class AppConfig:
     logging: LoggingConfig
     dcs: DcsConfig
     models: tuple[ModelBackendConfig, ...] = field(default_factory=tuple)
-    model_routing: ModelRoutingConfig = field(default_factory=lambda: ModelRoutingConfig(red_backend="", blue_backend=""))
+    model_catalog: tuple[ModelCatalogEntryConfig, ...] = field(default_factory=tuple)
+    model_routing: ModelRoutingConfig = field(default_factory=ModelRoutingConfig)
     scenario: ScenarioConfig = field(default_factory=lambda: ScenarioConfig(id="", registry_path=""))
     persistence: PersistenceConfig = field(default_factory=lambda: PersistenceConfig(db_path=""))
     dry_run: DryRunConfig = field(default_factory=lambda: DryRunConfig(enabled=True))
@@ -205,6 +229,15 @@ def _optional_str(data: dict[str, Any], key: str) -> str | None:
     if not isinstance(value, str) or not value.strip():
         raise ConfigError(f"Config field '{key}' must be a non-empty string when provided.")
     return value
+
+
+def _optional_str_list(data: dict[str, Any], key: str) -> tuple[str, ...]:
+    value = data.get(key)
+    if value is None:
+        return ()
+    if not isinstance(value, list) or any(not isinstance(item, str) or not item.strip() for item in value):
+        raise ConfigError(f"Config field '{key}' must be an array of non-empty strings when provided.")
+    return tuple(item.strip() for item in value)
 
 
 def _non_negative_int(data: dict[str, Any], key: str, default: int) -> int:
@@ -287,6 +320,9 @@ def load_config(path: str | Path) -> AppConfig:
     models_raw = raw.get("models", [])
     if not isinstance(models_raw, list):
         raise ConfigError("Config field 'models' must be an array of tables when provided.")
+    model_catalog_raw = raw.get("model_catalog", [])
+    if not isinstance(model_catalog_raw, list):
+        raise ConfigError("Config field 'model_catalog' must be an array of tables when provided.")
 
     backends = []
     for index, model_raw in enumerate(models_raw):
@@ -320,36 +356,119 @@ def load_config(path: str | Path) -> AppConfig:
     if not backends:
         raise ConfigError("Config must define at least one model backend in the 'models' array.")
 
-    backend_names = {backend.name for backend in backends}
-    red_backend = _require_str(model_routing, "red_backend")
-    blue_backend = _require_str(model_routing, "blue_backend")
-    red_fallback_backend = _optional_str(model_routing, "red_fallback_backend")
-    blue_fallback_backend = _optional_str(model_routing, "blue_fallback_backend")
-    if red_backend not in backend_names:
-        raise ConfigError(f"Config field 'model_routing.red_backend' references unknown backend '{red_backend}'.")
-    if blue_backend not in backend_names:
-        raise ConfigError(f"Config field 'model_routing.blue_backend' references unknown backend '{blue_backend}'.")
-    if red_fallback_backend is not None and red_fallback_backend not in backend_names:
-        raise ConfigError(
-            f"Config field 'model_routing.red_fallback_backend' references unknown backend '{red_fallback_backend}'."
-        )
-    if blue_fallback_backend is not None and blue_fallback_backend not in backend_names:
-        raise ConfigError(
-            f"Config field 'model_routing.blue_fallback_backend' references unknown backend '{blue_fallback_backend}'."
-        )
     backend_by_name = {backend.name: backend for backend in backends}
-    if not backend_by_name[red_backend].enabled:
-        raise ConfigError(f"Config field 'model_routing.red_backend' must reference an enabled backend, got '{red_backend}'.")
-    if not backend_by_name[blue_backend].enabled:
-        raise ConfigError(f"Config field 'model_routing.blue_backend' must reference an enabled backend, got '{blue_backend}'.")
-    if red_fallback_backend is not None and not backend_by_name[red_fallback_backend].enabled:
-        raise ConfigError(
-            f"Config field 'model_routing.red_fallback_backend' must reference an enabled backend, got '{red_fallback_backend}'."
+    backend_names = set(backend_by_name)
+    catalog_entries: list[ModelCatalogEntryConfig] = []
+    catalog_by_id: dict[str, ModelCatalogEntryConfig] = {}
+    if model_catalog_raw:
+        for index, item in enumerate(model_catalog_raw):
+            if not isinstance(item, dict):
+                raise ConfigError(f"Config field 'model_catalog[{index}]' must be a table.")
+            backend_name = _require_str(item, "backend_name")
+            if backend_name not in backend_names:
+                raise ConfigError(
+                    f"Config field 'model_catalog[{index}].backend_name' references unknown backend '{backend_name}'."
+                )
+            entry = ModelCatalogEntryConfig(
+                id=_require_str(item, "id"),
+                display_name=_require_str(item, "display_name"),
+                backend_name=backend_name,
+                server_label=_optional_str(item, "server_label") or backend_name,
+                enabled=bool(item.get("enabled", backend_by_name[backend_name].enabled)),
+                hidden=bool(item.get("hidden", False)),
+                tags=_optional_str_list(item, "tags"),
+            )
+            if entry.id in catalog_by_id:
+                raise ConfigError(f"Config field 'model_catalog' contains duplicate id '{entry.id}'.")
+            catalog_entries.append(entry)
+            catalog_by_id[entry.id] = entry
+    else:
+        for backend in backends:
+            if not backend.enabled:
+                continue
+            entry = ModelCatalogEntryConfig(
+                id=backend.name,
+                display_name=f"{backend.model} ({backend.name})",
+                backend_name=backend.name,
+                server_label=backend.name,
+                enabled=True,
+                hidden=False,
+                tags=(backend.hosting_mode.value,),
+            )
+            catalog_entries.append(entry)
+            catalog_by_id[entry.id] = entry
+
+    def resolve_backend_reference(field_name: str, value: str | None) -> tuple[str | None, str | None]:
+        if value is None:
+            return (None, None)
+        if value in catalog_by_id:
+            entry = catalog_by_id[value]
+            if not entry.enabled:
+                raise ConfigError(f"Config field '{field_name}' must reference an enabled catalog entry, got '{value}'.")
+            backend_name = entry.backend_name
+            if not backend_by_name[backend_name].enabled:
+                raise ConfigError(
+                    f"Config field '{field_name}' resolved to disabled backend '{backend_name}' via catalog '{value}'."
+                )
+            return (backend_name, value)
+        if value in backend_by_name:
+            if not backend_by_name[value].enabled:
+                raise ConfigError(f"Config field '{field_name}' must reference an enabled backend, got '{value}'.")
+            return (value, None)
+        raise ConfigError(f"Config field '{field_name}' references unknown backend or catalog entry '{value}'.")
+
+    legacy_red_backend = _optional_str(model_routing, "red_backend")
+    legacy_blue_backend = _optional_str(model_routing, "blue_backend")
+    legacy_red_fallback_backend = _optional_str(model_routing, "red_fallback_backend")
+    legacy_blue_fallback_backend = _optional_str(model_routing, "blue_fallback_backend")
+    default_backend_raw = _optional_str(model_routing, "default_backend")
+    default_fallback_raw = _optional_str(model_routing, "default_fallback_backend")
+    red_override_raw = _optional_str(model_routing, "red_backend_override")
+    blue_override_raw = _optional_str(model_routing, "blue_backend_override")
+    red_fallback_override_raw = _optional_str(model_routing, "red_fallback_backend_override")
+    blue_fallback_override_raw = _optional_str(model_routing, "blue_fallback_backend_override")
+
+    if default_backend_raw is not None or red_override_raw is not None or blue_override_raw is not None:
+        if default_backend_raw is None:
+            raise ConfigError("Config field 'model_routing.default_backend' is required when using shared-default routing.")
+        default_backend, default_catalog_id = resolve_backend_reference("model_routing.default_backend", default_backend_raw)
+        default_fallback_backend, default_fallback_catalog_id = resolve_backend_reference(
+            "model_routing.default_fallback_backend",
+            default_fallback_raw,
         )
-    if blue_fallback_backend is not None and not backend_by_name[blue_fallback_backend].enabled:
-        raise ConfigError(
-            f"Config field 'model_routing.blue_fallback_backend' must reference an enabled backend, got '{blue_fallback_backend}'."
+        red_backend, red_catalog_override = resolve_backend_reference("model_routing.red_backend_override", red_override_raw)
+        blue_backend, blue_catalog_override = resolve_backend_reference("model_routing.blue_backend_override", blue_override_raw)
+        red_fallback_backend, red_fallback_catalog_override = resolve_backend_reference(
+            "model_routing.red_fallback_backend_override",
+            red_fallback_override_raw,
         )
+        blue_fallback_backend, blue_fallback_catalog_override = resolve_backend_reference(
+            "model_routing.blue_fallback_backend_override",
+            blue_fallback_override_raw,
+        )
+        red_backend = red_backend or default_backend
+        blue_backend = blue_backend or default_backend
+        red_fallback_backend = red_fallback_backend or default_fallback_backend
+        blue_fallback_backend = blue_fallback_backend or default_fallback_backend
+    else:
+        if legacy_red_backend is None or legacy_blue_backend is None:
+            raise ConfigError(
+                "Config section 'model_routing' must define either legacy 'red_backend'/'blue_backend' fields or the new shared-default routing fields."
+            )
+        red_backend, red_catalog_override = resolve_backend_reference("model_routing.red_backend", legacy_red_backend)
+        blue_backend, blue_catalog_override = resolve_backend_reference("model_routing.blue_backend", legacy_blue_backend)
+        red_fallback_backend, red_fallback_catalog_override = resolve_backend_reference(
+            "model_routing.red_fallback_backend",
+            legacy_red_fallback_backend,
+        )
+        blue_fallback_backend, blue_fallback_catalog_override = resolve_backend_reference(
+            "model_routing.blue_fallback_backend",
+            legacy_blue_fallback_backend,
+        )
+        default_backend = red_backend if red_backend == blue_backend else None
+        default_catalog_id = None
+        default_fallback_backend = red_fallback_backend if red_fallback_backend == blue_fallback_backend else None
+        default_fallback_catalog_id = None
 
     try:
         log_format = LoggingFormat(_require_str(logging, "format"))
@@ -447,7 +566,20 @@ def load_config(path: str | Path) -> AppConfig:
             ),
         ),
         models=tuple(backends),
+        model_catalog=tuple(catalog_entries),
         model_routing=ModelRoutingConfig(
+            default_backend=default_backend,
+            default_fallback_backend=default_fallback_backend,
+            red_backend_override=red_override_raw,
+            blue_backend_override=blue_override_raw,
+            red_fallback_backend_override=red_fallback_override_raw,
+            blue_fallback_backend_override=blue_fallback_override_raw,
+            default_catalog_id=default_catalog_id,
+            default_fallback_catalog_id=default_fallback_catalog_id,
+            red_catalog_override=red_catalog_override,
+            blue_catalog_override=blue_catalog_override,
+            red_fallback_catalog_override=red_fallback_catalog_override,
+            blue_fallback_catalog_override=blue_fallback_catalog_override,
             red_backend=red_backend,
             blue_backend=blue_backend,
             red_fallback_backend=red_fallback_backend,

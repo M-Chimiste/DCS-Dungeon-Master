@@ -64,11 +64,23 @@ temperature = 0.2
 max_output_tokens = 1200
 system_prompt_variant = "phase1_default"
 
+[[model_catalog]]
+id = "local_gemma"
+display_name = "Local Gemma"
+backend_name = "local_default"
+server_label = "LM Studio (Local)"
+tags = ["local", "fast"]
+
+[[model_catalog]]
+id = "hosted_gpt5"
+display_name = "Hosted GPT-5"
+backend_name = "hosted_default"
+server_label = "OpenAI"
+tags = ["hosted", "fallback"]
+
 [model_routing]
-red_backend = "local_default"
-blue_backend = "local_default"
-red_fallback_backend = "hosted_default"
-blue_fallback_backend = "hosted_default"
+default_backend = "local_gemma"
+default_fallback_backend = "hosted_gpt5"
 
 [scenario]
 id = "phase1_baseline_persian_gulf"

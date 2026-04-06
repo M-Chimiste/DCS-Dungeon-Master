@@ -1,0 +1,73 @@
+{
+  "action_quality": {
+    "average_accepted_actions_per_cycle": 0.0,
+    "average_rejected_actions_per_cycle": 0.0,
+    "conflict_rate": 0.0,
+    "duplicate_adjacent_cycle_rate": 0.0,
+    "rejection_rate_by_code": {},
+    "total_actions_accepted": 0,
+    "total_actions_proposed": 0,
+    "total_actions_rejected": 0
+  },
+  "decision_cadence_sec": 30,
+  "fairness_mode": "hybrid",
+  "fairness_rating": "excellent",
+  "fairness_score": 100,
+  "findings_pending_review": 0,
+  "generated_at": "2026-04-05T23:55:11.183687+00:00",
+  "loop_health": {
+    "cycles_completed": 0,
+    "integration_interruptions": 0,
+    "model_timeouts": 0,
+    "unhandled_run_failures": 0,
+    "usable_decision_rate": 0.0
+  },
+  "observation_integrity": {
+    "average_contact_staleness_at_decision_time": 0.0,
+    "low_confidence_enemy_decision_rate": 0.0,
+    "suspicious_finding_count": 0
+  },
+  "profile_name": "phase1_baseline",
+  "prompt_version": "phase1_default",
+  "resource_discipline": {
+    "budget_spent_by_coalition": {
+      "blue": 0,
+      "red": 0
+    },
+    "high_value_asset_loss_count": 0,
+    "immediate_reserve_dumping_by_coalition": {
+      "blue": false,
+      "red": false
+    },
+    "reserve_commitments_by_coalition": {
+      "blue": 0,
+      "red": 0
+    },
+    "time_to_first_reserve_commitment_by_coalition": {
+      "blue": null,
+      "red": null
+    }
+  },
+  "resource_settings_version": "phase1_default",
+  "review_policy": "suspicious_only",
+  "run_id": "04d29b5780ca4203b8bc0ee6d2d15d25",
+  "strategic_behavior": {
+    "central_objective_control_share_by_coalition": {
+      "blue": 0.0,
+      "red": 0.0
+    },
+    "contested_center_activity_cycles": 0,
+    "control_point_owner_change_count": 0,
+    "sector_priority_change_count": 0,
+    "successful_reposition_withdraw_under_threat_count": 0
+  },
+  "suspicious_finding_count": 0,
+  "top_rejection_codes": {},
+  "tuning_notes": [
+    {
+      "detail": "The run showed very low reprioritization and no meaningful reserve use.",
+      "note_type": "strategy_inert",
+      "severity": "medium"
+    }
+  ]
+}

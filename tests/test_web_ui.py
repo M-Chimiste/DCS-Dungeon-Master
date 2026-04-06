@@ -260,3 +260,39 @@ def test_web_ui_draft_management_routes(tmp_path: Path) -> None:
     assert revert_payload["draft"]["draft_id"] == draft_id
     assert delete_status == 200
     assert delete_payload["deleted"] is True
+
+
+def test_web_ui_model_catalog_and_run_routing_routes(tmp_path: Path) -> None:
+    config_path = _write_temp_config(tmp_path)
+    service = WebUiService.from_config_path(config_path)
+
+    catalog_status, catalog_payload = service.dispatch("GET", "/api/model-catalog")
+    create_status, create_payload = service.dispatch(
+        "POST",
+        "/api/runs",
+        {
+            "scenario_id": "phase1_baseline_persian_gulf",
+            "mode": "dry",
+            "routing": {
+                "same_for_both": False,
+                "shared_primary_catalog_id": "local_default",
+                "red_primary_catalog_id": "local_default",
+                "blue_primary_adhoc": {
+                    "display_name": "Hosted Blue Override",
+                    "endpoint": "https://api.example.test/v1",
+                    "model": "gpt-5",
+                    "hosting_mode": "hosted",
+                },
+            },
+        },
+    )
+    run_id = create_payload["run"]["run_id"]
+    routing_status, routing_payload = service.dispatch("GET", f"/api/runs/{run_id}/routing")
+
+    assert catalog_status == 200
+    assert catalog_payload["catalog"]
+    assert create_status == 200
+    assert create_payload["run"]["routing"]["red"]["primary_backend_name"] == "local_default"
+    assert create_payload["run"]["routing"]["blue"]["primary_source"] == "ad_hoc"
+    assert routing_status == 200
+    assert routing_payload["run_scoped_backends"][0]["model"] == "gpt-5"

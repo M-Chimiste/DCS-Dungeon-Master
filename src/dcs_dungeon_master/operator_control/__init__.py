@@ -386,6 +386,7 @@ class OperatorControlService:
                 "status": run.status.value,
                 "red_backend_name": run.red_backend_name,
                 "blue_backend_name": run.blue_backend_name,
+                "routing": _normalize(run.routing) if run.routing is not None else None,
                 "decision_cycle_count": summary.decision_cycle_count,
                 "latest_decision_cycle": summary.latest_decision_cycle,
                 "cycle_classification_counts": summary.cycle_classification_counts,
@@ -423,7 +424,23 @@ class OperatorControlService:
             backend_assignments={
                 "red_backend_name": (left.run.red_backend_name, right.run.red_backend_name),
                 "blue_backend_name": (left.run.blue_backend_name, right.run.blue_backend_name),
+                "red_primary_catalog_id": (
+                    left.run.routing.red.primary_catalog_id if left.run.routing else None,
+                    right.run.routing.red.primary_catalog_id if right.run.routing else None,
+                ),
+                "blue_primary_catalog_id": (
+                    left.run.routing.blue.primary_catalog_id if left.run.routing else None,
+                    right.run.routing.blue.primary_catalog_id if right.run.routing else None,
+                ),
             },
+            routing_modes=(
+                "symmetric" if left.run.routing and left.run.routing.is_symmetric else "asymmetric",
+                "symmetric" if right.run.routing and right.run.routing.is_symmetric else "asymmetric",
+            ),
+            symmetric_routing=(
+                bool(left.run.routing and left.run.routing.is_symmetric),
+                bool(right.run.routing and right.run.routing.is_symmetric),
+            ),
             decision_cycle_counts=(left.decision_cycle_count, right.decision_cycle_count),
             latest_decision_cycles=(left.latest_decision_cycle, right.latest_decision_cycle),
             cycle_classification_counts=self._paired_counts(left.cycle_classification_counts, right.cycle_classification_counts),
